@@ -14,7 +14,8 @@ include_directories("include/" "src/")
 set(SRC 
 	src/main.cpp
 	src/logging/logger.cpp
-	src/validation/validation.cpp)
+	src/validation/validation.cpp
+	src/network/listener.cpp)
 
 add_executable(${PROJECT_NAME} ${SRC})
 
