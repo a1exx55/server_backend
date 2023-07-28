@@ -45,7 +45,7 @@ void listener::do_accept()
     _acceptor.async_accept(
         net::make_strand(_io_context),
         beast::bind_front_handler(
-            &on_accept,
+            &listener::on_accept,
             shared_from_this()));
 }
 
@@ -59,10 +59,9 @@ void listener::on_accept(beast::error_code error_code, tcp::socket socket)
     else
     {
         // Create the session and run it
-        std::make_shared<session>(
+        std::make_shared<http_session>(
             std::move(socket),
-            _ssl_context,
-            doc_root_)->run();
+            _ssl_context)->run();
     }
 
     // Accept another connection

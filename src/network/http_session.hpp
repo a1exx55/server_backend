@@ -1,9 +1,19 @@
 #ifndef HTTP_SESSION_HPP
 #define HTTP_SESSION_HPP
 
-#include <iostream>
-#include <memory>
+//local
+#include <logging/logger.hpp>
+#include <config.hpp>
 
+//internal
+#include <iostream>
+#include <fstream>
+#include <memory>
+#include <optional>
+#include <filesystem>
+#include <map>
+
+///external
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
 #include <boost/beast/ssl.hpp>
@@ -11,159 +21,79 @@
 #include <boost/asio/dispatch.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/config.hpp>
+#include <boost/json.hpp>
+#include<boost/tokenizer.hpp>
+
+namespace beast = boost::beast;  
+namespace http = boost::beast::http;      
+namespace net = boost::asio;            
+namespace ssl = boost::asio::ssl;
+namespace json = boost::json;       
+using tcp = boost::asio::ip::tcp;
 
 class http_session : public std::enable_shared_from_this<http_session>
 {
-    beast::ssl_stream<beast::tcp_stream> stream_;
-    beast::flat_buffer buffer_;
-    std::shared_ptr<std::string const> doc_root_;
-    http::request<http::string_body> req_;
+    beast::ssl_stream<beast::tcp_stream> _stream;
+    beast::flat_buffer _buffer;
+    std::optional<http::request_parser<http::empty_body>> _header_request_parser;
+    std::optional<http::request_parser<http::string_body>> _string_request_parser;
+    std::optional<http::request_parser<http::buffer_body>> _file_request_parser;
+    http::response<http::empty_body> _header_response;
+    http::response<http::string_body> _string_response;
+    json::parser _body_json_parser;
+
+    // static const json::value _target_tokens;
+    const std::map<std::string, std::function<void()>> _target_to_function_relations =
+    {
+        {"/api/user/login", std::bind(&http_session::handle_login, this)},
+        {"/api/user/logout", std::bind(&http_session::handle_logout, this)},
+        {"/api/user/refresh/web", std::bind(&http_session::handle_refresh_web, this)},
+        {"/api/user/refresh/desktop", std::bind(&http_session::handle_refresh_desktop, this)}
+    };
 
 public:
     // Take ownership of the socket
-    explicit
-    http_session(
+    explicit http_session(
         tcp::socket&& socket,
-        ssl::context& ctx,
-        std::shared_ptr<std::string const> const& doc_root)
-        : stream_(std::move(socket), ctx)
-        , doc_root_(doc_root)
+        ssl::context& ssl_context)
+        :_stream(std::move(socket), ssl_context) 
     {
+        _string_response.keep_alive(true);
+        _string_response.version(11);
+        _string_response.set(http::field::server, "OCSearch");
+        _string_response.set(http::field::host, config::SERVER_IP_ADDRESS + ":" + std::to_string(config::SERVER_PORT));
     }
 
-    // Start the asynchronous operation
-    void
-    run()
-    {
-        // We need to be executing within a strand to perform async operations
-        // on the I/O objects in this http_session. Although not strictly necessary
-        // for single-threaded contexts, this example code is written to be
-        // thread-safe by default.
-        net::dispatch(
-            stream_.get_executor(),
-            beast::bind_front_handler(
-                &http_session::on_run,
-                shared_from_this()));
-    }
+    // Start the asynchronous http session
+    void run();
 
-    void
-    on_run()
-    {
-        // Set the timeout.
-        beast::get_lowest_layer(stream_).expires_after(
-            std::chrono::seconds(30));
+private:
+    // Start ...
+    void on_run();
+    
+    void on_handshake(beast::error_code error_code);
 
-        // Perform the SSL handshake
-        stream_.async_handshake(
-            ssl::stream_base::server,
-            beast::bind_front_handler(
-                &http_session::on_handshake,
-                shared_from_this()));
-    }
+    void do_read_header();
 
-    void
-    on_handshake(beast::error_code ec)
-    {
-        if(ec)
-            return fail(ec, "handshake");
+    void on_read_header(beast::error_code error_code, std::size_t bytes_transferred);
 
-        do_read();
-    }
+    void handle_header();
 
-    void
-    do_read()
-    {
-        // Make the request empty before reading,
-        // otherwise the operation behavior is undefined.
-        req_ = {};
+    void send_error_response(http::status response_status, const std::string& error_message);
 
-        // Set the timeout.
-        beast::get_lowest_layer(stream_).expires_after(std::chrono::seconds(30));
+    void send_response(http::message_generator&& msg);
 
-        // Read a request
-        http::async_read(stream_, buffer_, req_,
-            beast::bind_front_handler(
-                &http_session::on_read,
-                shared_from_this()));
-    }
+    void on_write(beast::error_code error_code, std::size_t bytes_transferred);
 
-    void
-    on_read(
-        beast::error_code ec,
-        std::size_t bytes_transferred)
-    {
-        boost::ignore_unused(bytes_transferred);
+    void do_close();
 
-        // This means they closed the connection
-        if(ec == http::error::end_of_stream)
-            return do_close();
+    void on_shutdown(beast::error_code ec);
 
-        if(ec)
-            return fail(ec, "read");
-
-        // Send the response
-        send_response(
-            handle_request(*doc_root_, std::move(req_)));
-    }
-
-    void
-    send_response(http::message_generator&& msg)
-    {
-        bool keep_alive = msg.keep_alive();
-
-        // Write the response
-        beast::async_write(
-            stream_,
-            std::move(msg),
-            beast::bind_front_handler(
-                &http_session::on_write,
-                this->shared_from_this(),
-                keep_alive));
-    }
-
-    void
-    on_write(
-        bool keep_alive,
-        beast::error_code ec,
-        std::size_t bytes_transferred)
-    {
-        boost::ignore_unused(bytes_transferred);
-
-        if(ec)
-            return fail(ec, "write");
-
-        if(! keep_alive)
-        {
-            // This means we should close the connection, usually because
-            // the response indicated the "Connection: close" semantic.
-            return do_close();
-        }
-
-        // Read another request
-        do_read();
-    }
-
-    void
-    do_close()
-    {
-        // Set the timeout.
-        beast::get_lowest_layer(stream_).expires_after(std::chrono::seconds(30));
-
-        // Perform the SSL shutdown
-        stream_.async_shutdown(
-            beast::bind_front_handler(
-                &http_session::on_shutdown,
-                shared_from_this()));
-    }
-
-    void
-    on_shutdown(beast::error_code ec)
-    {
-        if(ec)
-            return fail(ec, "shutdown");
-
-        // At this point the connection is closed gracefully
-    }
+    void handle_login();
+    void handle_logout();
+    void handle_refresh_web();
+    void handle_refresh_desktop();
+    void handle_sessions_info();
 }; 
 
 #endif

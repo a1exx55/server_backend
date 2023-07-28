@@ -2,6 +2,7 @@
 #define CONFIG_HPP
 
 #include <string>
+#include <stdint.h>
 
 namespace config
 {

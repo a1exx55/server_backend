@@ -5,6 +5,8 @@
 #include <config.hpp>
 #include <network/listener.hpp>
 #include <network/server_certificate.hpp>
+//#include <boost/certify/extensions.hpp>
+//#include <boost/certify/https_verification.hpp>
 
 //internal
 #include <thread>
@@ -30,7 +32,13 @@ namespace server
         ssl::context ssl_context{ssl::context::tlsv12};
 
         // This holds the self-signed certificate used by the server
+
         load_server_certificate(ssl_context);
+
+        //???maybe will be necessary to perform real tcp
+        //ssl_context.set_verify_mode(ssl::verify_peer);
+        //ssl_context.set_verify_mode(ssl::context::verify_peer );
+        //boost::certify::enable_native_https_server_verification(ssl_context);
 
         // Create and launch a listening port
         std::make_shared<listener>(
