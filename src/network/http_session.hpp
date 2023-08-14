@@ -4,6 +4,8 @@
 //local
 #include <logging/logger.hpp>
 #include <config.hpp>
+#include <jwt_utils/jwt_utils.hpp>
+#include <request_handlers/request_handlers.hpp>
 
 //internal
 #include <iostream>
@@ -33,67 +35,88 @@ using tcp = boost::asio::ip::tcp;
 
 class http_session : public std::enable_shared_from_this<http_session>
 {
-    beast::ssl_stream<beast::tcp_stream> _stream;
-    beast::flat_buffer _buffer;
-    std::optional<http::request_parser<http::empty_body>> _header_request_parser;
-    std::optional<http::request_parser<http::string_body>> _string_request_parser;
-    std::optional<http::request_parser<http::buffer_body>> _file_request_parser;
-    http::response<http::empty_body> _header_response;
-    http::response<http::string_body> _string_response;
-    json::parser _body_json_parser;
+    public:
+        explicit http_session(tcp::socket&& socket, ssl::context& ssl_context);
 
-    // static const json::value _target_tokens;
-    const std::map<std::string, std::function<void()>> _target_to_function_relations =
-    {
-        {"/api/user/login", std::bind(&http_session::handle_login, this)},
-        {"/api/user/logout", std::bind(&http_session::handle_logout, this)},
-        {"/api/user/refresh/web", std::bind(&http_session::handle_refresh_web, this)},
-        {"/api/user/refresh/desktop", std::bind(&http_session::handle_refresh_desktop, this)}
-    };
+        // Start the asynchronous http session
+        void run();
 
-public:
-    // Take ownership of the socket
-    explicit http_session(
-        tcp::socket&& socket,
-        ssl::context& ssl_context)
-        :_stream(std::move(socket), ssl_context) 
-    {
-        _string_response.keep_alive(true);
-        _string_response.version(11);
-        _string_response.set(http::field::server, "OCSearch");
-        _string_response.set(http::field::host, config::SERVER_IP_ADDRESS + ":" + std::to_string(config::SERVER_PORT));
-    }
+    private:
+        // Start ...
+        void on_run();
+        
+        void on_handshake(beast::error_code error_code);
 
-    // Start the asynchronous http session
-    void run();
+        void do_read_header();
 
-private:
-    // Start ...
-    void on_run();
-    
-    void on_handshake(beast::error_code error_code);
+        void on_read_header(beast::error_code error_code, std::size_t bytes_transferred);
 
-    void do_read_header();
+        void do_read_body(const std::function<void(
+            const http::request_parser<http::string_body>&, 
+            http::response<http::string_body>&)>&);
 
-    void on_read_header(beast::error_code error_code, std::size_t bytes_transferred);
+        void on_read_body(const std::function<void(
+                const http::request_parser<http::string_body>&, 
+                http::response<http::string_body>&)>& request_handler, 
+            beast::error_code error_code, 
+            std::size_t bytes_transferred);
 
-    void handle_header();
+        void prepare_error_response(http::status response_status, const std::string& error_message);
 
-    void send_error_response(http::status response_status, const std::string& error_message);
+        void do_write_response();
 
-    void send_response(http::message_generator&& msg);
+        void on_write_response(beast::error_code error_code, std::size_t bytes_transferred);
 
-    void on_write(beast::error_code error_code, std::size_t bytes_transferred);
+        void do_close();
 
-    void do_close();
+        void on_shutdown(beast::error_code ec);
 
-    void on_shutdown(beast::error_code ec);
+        bool validate_access_token();
 
-    void handle_login();
-    void handle_logout();
-    void handle_refresh_web();
-    void handle_refresh_desktop();
-    void handle_sessions_info();
+        bool validate_refresh_token();
+
+        beast::ssl_stream<beast::tcp_stream> _stream;
+        beast::flat_buffer _buffer;
+        // Wrap in std::optional to use parser several times by invoking .emplace() every request
+        std::optional<http::request_parser<http::string_body>> _request_parser;
+        http::response<http::string_body> _response;
+        json::parser _body_json_parser;
+        jwt_utils _jwt;
+        // This map is used to determine what to do depends on the header target value
+        const std::map<std::string, std::function<void()>> _target_to_handler_relations
+        {
+            {
+                "/api/user/login", 
+                [this]
+                {
+                    do_read_body(request_handlers::handle_login);
+                }
+            },
+            {
+                "/api/user/logout", 
+                [this]
+                {
+                    if (!validate_refresh_token()) return;
+                    request_handlers::handle_logout(*_request_parser, _response);
+                }
+            },
+            {
+                "/api/user/refresh", 
+                [this]
+                {
+                    if (!validate_refresh_token()) return;
+                    request_handlers::handle_refresh(*_request_parser, _response);
+                }
+            },
+            {
+                "/api/user/sessions_info", 
+                [this]
+                {
+                    if (!validate_access_token()) return;
+                    request_handlers::handle_sessions_info(*_request_parser, _response);
+                }
+            }
+        };
 }; 
 
 #endif
