@@ -4,7 +4,8 @@
 
 int main()
 {
+    LOG_INFO << "The server was successfully started!";
     server::run();
-    LOG_INFO << "Server was successfully shut down!";
+    LOG_INFO << "The server was successfully shut down!";
     return 0;
 }

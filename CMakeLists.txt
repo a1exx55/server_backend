@@ -11,7 +11,7 @@ find_package(Boost COMPONENTS REQUIRED
 	json 
 	log_setup 
 	log)
-	
+
 find_package(OpenSSL REQUIRED)
 
 include_directories("include/" "src/")
@@ -24,7 +24,8 @@ set(SRC
 	src/network/listener.cpp
 	src/network/http_session.cpp
 	src/request_handlers/request_handlers.cpp
-	src/jwt_utils/jwt_utils.cpp)
+	src/jwt_utils/jwt_utils.cpp
+	src/cookie_utils/cookie_utils.cpp)
 
 add_executable(${PROJECT_NAME} ${SRC})
 

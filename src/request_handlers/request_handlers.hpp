@@ -1,6 +1,11 @@
 #ifndef REQUEST_HANDLERS_HPP
 #define REQUEST_HANDLERS_HPP
 
+//local
+#include <cookie_utils/cookie_utils.hpp>
+#include <config.hpp> 
+
+//external
 #include <boost/beast/http.hpp>
 
 namespace http = boost::beast::http;
@@ -23,7 +28,14 @@ namespace request_handlers
         const http::request_parser<http::string_body>& request_parser, 
         http::response<http::string_body>& response);
 
-    void handle_upload_files();
-}
+    void handle_upload_files(
+        const http::request_parser<http::string_body>& request_parser, 
+        http::response<http::string_body>& response);
+
+    void prepare_error_response(
+        http::response<http::string_body>& response, 
+        const http::status response_status,
+        const std::string_view& error_message);
+};
 
 #endif

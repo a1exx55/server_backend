@@ -9,10 +9,8 @@
 
 //internal
 #include <iostream>
-#include <fstream>
 #include <memory>
 #include <optional>
-#include <filesystem>
 #include <map>
 
 ///external
@@ -24,7 +22,6 @@
 #include <boost/asio/strand.hpp>
 #include <boost/config.hpp>
 #include <boost/json.hpp>
-#include<boost/tokenizer.hpp>
 
 namespace beast = boost::beast;  
 namespace http = boost::beast::http;      
@@ -53,23 +50,25 @@ class http_session : public std::enable_shared_from_this<http_session>
 
         void do_read_body(const std::function<void(
             const http::request_parser<http::string_body>&, 
-            http::response<http::string_body>&)>&);
+            http::response<http::string_body>&)>& request_handler);
 
-        void on_read_body(const std::function<void(
+        void on_read_body(
+            const std::function<void(
                 const http::request_parser<http::string_body>&, 
                 http::response<http::string_body>&)>& request_handler, 
             beast::error_code error_code, 
             std::size_t bytes_transferred);
 
-        void prepare_error_response(http::status response_status, const std::string& error_message);
+        void prepare_error_response(const http::status response_status, const std::string_view& error_message);
 
-        void do_write_response();
+        void do_write_response(bool keep_alive = true);
 
-        void on_write_response(beast::error_code error_code, std::size_t bytes_transferred);
+        void on_write_response(bool keep_alive, beast::error_code error_code, std::size_t bytes_transferred);
 
         void do_close();
 
-        void on_shutdown(beast::error_code ec);
+        // Handle unexpected request attributes depending on whether the body is present or not
+        bool validate_request_attributes(bool has_body);
 
         bool validate_access_token();
 
@@ -80,8 +79,6 @@ class http_session : public std::enable_shared_from_this<http_session>
         // Wrap in std::optional to use parser several times by invoking .emplace() every request
         std::optional<http::request_parser<http::string_body>> _request_parser;
         http::response<http::string_body> _response;
-        json::parser _body_json_parser;
-        jwt_utils _jwt;
         // This map is used to determine what to do depends on the header target value
         const std::map<std::string, std::function<void()>> _target_to_handler_relations
         {
@@ -89,6 +86,11 @@ class http_session : public std::enable_shared_from_this<http_session>
                 "/api/user/login", 
                 [this]
                 {
+                    if (!validate_request_attributes(true))
+                    {
+                        return do_write_response(false);
+                    }
+
                     do_read_body(request_handlers::handle_login);
                 }
             },
@@ -96,24 +98,48 @@ class http_session : public std::enable_shared_from_this<http_session>
                 "/api/user/logout", 
                 [this]
                 {
-                    if (!validate_refresh_token()) return;
-                    request_handlers::handle_logout(*_request_parser, _response);
+                    if (!validate_request_attributes(false))
+                    {
+                        return do_write_response(false);
+                    }
+
+                    if (validate_refresh_token())
+                    {
+                        request_handlers::handle_logout(*_request_parser, _response);
+                    }
+                    do_write_response();
                 }
             },
             {
                 "/api/user/refresh", 
                 [this]
                 {
-                    if (!validate_refresh_token()) return;
-                    request_handlers::handle_refresh(*_request_parser, _response);
+                    if (!validate_request_attributes(false))
+                    {
+                        return do_write_response(false);
+                    }
+                    
+                    if (validate_refresh_token())
+                    {
+                        request_handlers::handle_refresh(*_request_parser, _response);
+                    }
+                    do_write_response();
                 }
             },
             {
                 "/api/user/sessions_info", 
                 [this]
                 {
-                    if (!validate_access_token()) return;
-                    request_handlers::handle_sessions_info(*_request_parser, _response);
+                    if (!validate_request_attributes(false))
+                    {
+                        return do_write_response(false);
+                    }
+
+                    if (validate_access_token())
+                    {
+                        request_handlers::handle_sessions_info(*_request_parser, _response);
+                    }
+                    do_write_response();
                 }
             }
         };
