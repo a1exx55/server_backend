@@ -20,12 +20,13 @@ include_directories("include/" "src/")
 set(SRC 
 	src/main.cpp
 	src/logging/logger.cpp
-	#src/validation/validation.cpp
 	src/network/listener.cpp
 	src/network/http_session.cpp
 	src/request_handlers/request_handlers.cpp
 	src/jwt_utils/jwt_utils.cpp
-	src/cookie_utils/cookie_utils.cpp)
+	src/cookie_utils/cookie_utils.cpp
+	src/validation/validation.cpp
+	src/validation/normalization.cpp)
 
 add_executable(${PROJECT_NAME} ${SRC})
 

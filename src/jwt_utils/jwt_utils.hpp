@@ -2,8 +2,10 @@
 #define JWT_UTILS_HPP
 
 //local
-#include <jwt-cpp/traits/boost-json/traits.h>
 #include <config.hpp>
+
+//external
+#include <jwt-cpp/traits/boost-json/traits.h>
 
 using traits = jwt::traits::boost_json;
 namespace json = boost::json;

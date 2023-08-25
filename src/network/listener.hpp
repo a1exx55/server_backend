@@ -6,7 +6,6 @@
 #include <network/http_session.hpp>
 
 //internal
-#include <iostream>
 #include <memory>
 
 //external

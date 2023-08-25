@@ -1,6 +1,7 @@
 #ifndef CONFIG_HPP
 #define CONFIG_HPP
 
+//internal
 #include <string>
 #include <stdint.h>
 #include <chrono>
