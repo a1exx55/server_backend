@@ -4,24 +4,33 @@
 //internal
 #include <stdint.h>
 #include <iostream>
+#include <variant>
 
 //external
 #include <boost/regex.hpp>
+#include <boost/regex/icu.hpp>
 #include <magic_enum.hpp>
 
 enum validation : uint_fast8_t
 {
     UNKNOWN = 0,
+    NO_VALIDATION,
+    BLANK,
+    BOOL,
+    SMALLINT,
+    INT,
+    BIGINT,
     EMAIL,
     PHONE, 
     FULL_NAME,
-    FULL_NAME_NICK,
+    NICK,
     PASSPORT,
     ADDRESS,
-    VK,
+    //VK,
     INN,
     SNILS,
     CAR_NUMBER,
+    DATE,
     DATETIME,
     IP,
     CARD_NUMBER
@@ -52,7 +61,8 @@ class validator
             validation excepted_validation);
 
     private:
-        static const std::map<validation, const boost::regex> _validation_regexes;
+        static const std::map<validation, std::variant<const boost::regex, const boost::u32regex>> _validation_regexes;
+        static std::variant<const boost::regex, const boost::u32regex> _regex;
 };
 
 #endif

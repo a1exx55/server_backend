@@ -6,6 +6,7 @@ project(dataleak_parser)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++20 -Wall -Wextra -pedantic -lssl -lcrypto")
 
 #add external libs
+find_package(ICU 71.1 COMPONENTS REQUIRED uc i18n)
 find_package(Boost COMPONENTS REQUIRED 
 	regex 
 	json 
@@ -26,15 +27,17 @@ set(SRC
 	src/jwt_utils/jwt_utils.cpp
 	src/cookie_utils/cookie_utils.cpp
 	src/validation/validation.cpp
-	src/validation/normalization.cpp)
+	src/validation/normalization.cpp
+	#src/parsing/patterns_storage.cpp
+	)
 
 add_executable(${PROJECT_NAME} ${SRC})
 
 #link external libs
 target_link_libraries(${PROJECT_NAME} 
+	ICU::uc ICU::i18n
 	Boost::regex 
 	Boost::json 
 	Boost::log_setup 
 	Boost::log 
-	OpenSSL::SSL 
-	OpenSSL::Crypto) 
+	OpenSSL::SSL OpenSSL::Crypto) 
