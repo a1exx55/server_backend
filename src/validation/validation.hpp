@@ -26,7 +26,6 @@ enum validation : uint_fast8_t
     NICK,
     PASSPORT,
     ADDRESS,
-    //VK,
     INN,
     SNILS,
     CAR_NUMBER,

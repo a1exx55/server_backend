@@ -30,10 +30,11 @@ class normalizer
 		// Transform the given string to the upper case
 		static void normalize_full_name(std::string &string_to_normalize);
 
+		// Transform dates in form of "DD.MM.YYYY" to "MM.DD.YYYY" to satisfy postgres dates style
+		// and avoid errors with insertion
+		// Don't do anything with others forms of dates as they are already acceptable to insert
 		static void normalize_date(std::string& string_to_normalize);
 
-		static void normalize_datetime(std::string& string_to_normalize);
-		
 		// Transform the given string to the upper case
 		static void normalize_car_number(std::string& string_to_normalize);
 
