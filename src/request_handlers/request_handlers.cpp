@@ -22,21 +22,30 @@ void request_handlers::handle_login(
     try
     {
         body_json = json::parse(request_parser.get().body());
-        size_t user_id;
-        // if (user_id = db.login(body_json.at("nickname").as_string(), body_json.at("password").as_string() != -1)
-        user_id = 123456789;
-        if (!(body_json.at("nickname").as_string() == "fuck" && body_json.at("password").as_string() == "you"))
+        auto db = database_pool::get();
+        auto user_id = db->login(body_json.at("nickname").as_string(), body_json.at("password").as_string());
+
+        if (!user_id.has_value())
         {
-            prepare_error_response(response, http::status::unauthorized, "Введен неверный пароль");
+            prepare_error_response(response, http::status::internal_server_error, "Internal server error occured");
             return;
         }
-        std::pair<std::string, std::string> tokens{jwt_utils::create_tokens(json::object
+
+        // User's credentials are invalid
+        if (*user_id == 0)
         {
-            {"userId", user_id}, 
-            {"nickname", body_json.at("nickname").as_string()},
-            // {"refreshTokenId", db.get_user_token_id(user_id)}
-            {"refreshTokenId", 987654321}
-        })};
+            prepare_error_response(response, http::status::unauthorized, "Incorrect password entered");
+            return;
+        }
+
+        std::pair<std::string, std::string> tokens{jwt_utils::create_tokens(
+            json::object
+            {
+                {"userId", *user_id}, 
+                {"nickname", body_json.at("nickname").as_string()},
+                // {"refreshTokenId", db.get_user_token_id(user_id)}
+                {"refreshTokenId", 987654321}
+            })};
         // ...
         response.erase(http::field::set_cookie);
         response.result(http::status::ok);
@@ -61,7 +70,7 @@ void request_handlers::handle_login(
     }
     catch(const std::exception&)
     {
-        prepare_error_response(response, http::status::unprocessable_entity, "Неверные данные");
+        prepare_error_response(response, http::status::unprocessable_entity, "Incorrect request format");
         return;
     }
 }

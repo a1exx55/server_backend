@@ -4,6 +4,7 @@
 //local
 #include <cookie_utils/cookie_utils.hpp>
 #include <config.hpp> 
+#include <database/database_pool.hpp>
 
 //external
 #include <boost/beast/http.hpp>

@@ -5,6 +5,7 @@
 #include <config.hpp>
 #include <network/listener.hpp>
 #include <network/server_certificate.hpp>
+#include <database/database_pool.hpp>
 //#include <boost/certify/extensions.hpp>
 //#include <boost/certify/https_verification.hpp>
 
@@ -25,6 +26,24 @@ namespace server
     // Run the server with parameters specified in config.hpp file
     inline void run()
     {
+        try
+        {
+            // Initialize pool of database connections
+            database_pool::init(
+                config::DATABASES_NUMBER,
+                config::DATABASE_USERNAME,
+                config::DATABASE_PASSWORD,
+                config::SERVER_IP_ADDRESS,
+                config::DATABASE_PORT,
+                config::DATABASE_NAME);
+        }
+        catch(const std::exception& e)
+        {
+            LOG_ERROR << e.what();
+            return;
+        }
+        
+
         // The io_context is required for all I/O
         net::io_context io_context{config::THREADS_NUMBER};
 

@@ -21,6 +21,8 @@ include_directories("include/" "src/")
 set(SRC 
 	src/main.cpp
 	src/logging/logger.cpp
+	src/database/database.cpp
+	src/database/database_pool.cpp
 	src/network/listener.cpp
 	src/network/http_session.cpp
 	src/request_handlers/request_handlers.cpp
@@ -35,6 +37,7 @@ add_executable(${PROJECT_NAME} ${SRC})
 
 #link external libs
 target_link_libraries(${PROJECT_NAME} 
+	-lpqxx -lpq
 	ICU::uc ICU::i18n
 	Boost::regex 
 	Boost::json 
