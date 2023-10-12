@@ -31,6 +31,7 @@ set(SRC
 	src/validation/validation.cpp
 	src/validation/normalization.cpp
 	#src/parsing/patterns_storage.cpp
+ 	src/spliteration/spliteration.cpp
 	)
 
 add_executable(${PROJECT_NAME} ${SRC})
