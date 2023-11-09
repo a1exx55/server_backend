@@ -11,20 +11,18 @@
 //external
 #include <boost/beast/core.hpp>
 #include <boost/beast/ssl.hpp>
-#include <boost/beast/version.hpp>
 #include <boost/asio/dispatch.hpp>
 #include <boost/asio/strand.hpp>
-#include <boost/config.hpp>
 
 namespace beast = boost::beast;        
-namespace net = boost::asio;            
+namespace asio = boost::asio;            
 namespace ssl = boost::asio::ssl;       
 using tcp = boost::asio::ip::tcp;
 
 class listener : public std::enable_shared_from_this<listener>
 {
     public:
-        listener(net::io_context& io_context, ssl::context& ssl_context, tcp::endpoint endpoint);
+        listener(asio::io_context& io_context, ssl::context& ssl_context, tcp::endpoint endpoint);
             
         void run();
 
@@ -33,7 +31,7 @@ class listener : public std::enable_shared_from_this<listener>
 
         void on_accept(beast::error_code error_code, tcp::socket socket);
 
-        net::io_context& _io_context;
+        asio::io_context& _io_context;
         ssl::context& _ssl_context;
         tcp::acceptor _acceptor;
 };

@@ -24,6 +24,9 @@ class jwt_utils
         // Return token payload as json object
         static json::object get_token_payload(const std::string& token);
 
+        // Return token payload claim 
+        static json::object get_token_claim(const std::string& token, const std::string& claim_name);
+
         // Check if token is valid
         static bool is_token_valid(const std::string &token);
 
@@ -33,6 +36,13 @@ class jwt_utils
         inline static const jwt::verifier<jwt::default_clock, traits> _verifier{jwt::verify<traits>()
 		    .allow_algorithm(_crypto_algrorithm)};
 
+};
+
+enum class jwt_token_type
+{
+    NO = 0,
+    ACCESS_TOKEN,
+    REFRESH_TOKEN
 };
 
 #endif

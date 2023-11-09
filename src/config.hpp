@@ -13,9 +13,10 @@ namespace config
     inline constexpr int THREADS_NUMBER{20};
     inline constexpr size_t DATABASES_NUMBER{20};
     inline constexpr size_t DATABASE_PORT{5432};
-    inline constexpr std::string DATABASE_NAME{"db_dev"};
-    inline constexpr std::string DATABASE_USERNAME{"dmitry"};
+    inline constexpr std::string DATABASE_NAME{"drain"};
+    inline constexpr std::string DATABASE_USERNAME{"root"};
     inline constexpr std::string DATABASE_PASSWORD{"oral"};
+    inline const std::string FOLDERS_PATH{"/home/dmitry/drains/"};
     inline const std::string LOG_FILE_PATH{"/home/dmitry/vscodeprojects/dataleak_parser/server_backend.log"};
     inline constexpr bool CONSOLE_LOG_ENABLED{true};
     inline constexpr std::string JWT_SECRET_KEY{"secret_key"};

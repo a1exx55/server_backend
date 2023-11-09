@@ -29,9 +29,8 @@ namespace request_handlers
         const http::request_parser<http::string_body>& request_parser, 
         http::response<http::string_body>& response);
 
-    void handle_upload_files(
-        const http::request_parser<http::string_body>& request_parser, 
-        http::response<http::string_body>& response);
+    void process_downloaded_files(
+        std::queue<std::pair<std::string, std::string>>&& file_ids_and_paths);
 
     void prepare_error_response(
         http::response<http::string_body>& response, 

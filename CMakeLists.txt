@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.26.4)
 project(dataleak_parser)
 
 #set flags for compiler
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++20 -Wall -Wextra -pedantic -lssl -lcrypto")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++20 -Wall -Wextra -g -pedantic -lssl -lcrypto")
 
 #add external libs
 find_package(ICU 71.1 COMPONENTS REQUIRED uc i18n)
@@ -14,7 +14,11 @@ find_package(Boost COMPONENTS REQUIRED
 	log)
 
 find_package(OpenSSL REQUIRED)
-
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM)
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    set(CMAKE_CUDA_COMPILER_LAUNCHER "${CCACHE_PROGRAM}") # CMake 3.9+
+endif()
 include_directories("include/" "src/")
 
 #include all source files
@@ -34,6 +38,8 @@ set(SRC
 	)
 
 add_executable(${PROJECT_NAME} ${SRC})
+
+target_precompile_headers(${PROJECT_NAME} PRIVATE precompiled_headers.hpp)
 
 #link external libs
 target_link_libraries(${PROJECT_NAME} 

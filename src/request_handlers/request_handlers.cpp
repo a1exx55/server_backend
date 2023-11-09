@@ -22,19 +22,33 @@ void request_handlers::handle_login(
     try
     {
         body_json = json::parse(request_parser.get().body());
-        auto db = database_pool::get();
-        auto user_id = db->login(body_json.at("nickname").as_string(), body_json.at("password").as_string());
 
-        if (!user_id.has_value())
+        auto db = database_pool::get();
+
+        // No available connections
+        if (!db)
+        {
+            prepare_error_response(
+                response, 
+                http::status::internal_server_error, 
+                "No available database connections");
+            return;
+        }
+
+        auto user_id = db->login(body_json.at("nickname").as_string(), body_json.at("password").as_string());
+        database_pool::release(std::move(db));
+
+        // An error occured with database connection
+        if (!user_id)
         {
             prepare_error_response(response, http::status::internal_server_error, "Internal server error occured");
             return;
         }
 
         // User's credentials are invalid
-        if (*user_id == 0)
+        if (*user_id == "")
         {
-            prepare_error_response(response, http::status::unauthorized, "Incorrect password entered");
+            prepare_error_response(response, http::status::unauthorized, "Invalid login credentials");
             return;
         }
 
@@ -44,7 +58,7 @@ void request_handlers::handle_login(
                 {"userId", *user_id}, 
                 {"nickname", body_json.at("nickname").as_string()},
                 // {"refreshTokenId", db.get_user_token_id(user_id)}
-                {"refreshTokenId", 987654321}
+                // {"refreshTokenId", 987654321}
             })};
         // ...
         response.erase(http::field::set_cookie);
@@ -64,7 +78,7 @@ void request_handlers::handle_login(
         response.body() = json::serialize(json::object
         {
             {"nickname", body_json.at("nickname").as_string()},
-            {"accessToken", tokens.second}
+            {"accessToken", tokens.first}
         });
         response.prepare_payload();
     }
@@ -79,7 +93,7 @@ void request_handlers::handle_logout(
     const http::request_parser<http::string_body>& request_parser, 
     http::response<http::string_body>& response)
 {
-    
+    prepare_error_response(response, http::status::ok, "test");
 }
 
 void request_handlers::handle_refresh(
@@ -96,9 +110,6 @@ void request_handlers::handle_sessions_info(
     
 }
 
-void request_handlers::handle_upload_files(
-    const http::request_parser<http::string_body>& request_parser, 
-    http::response<http::string_body>& response)
+void request_handlers::process_downloaded_files(std::queue<std::pair<std::string,std::string>>&& file_ids_and_paths)
 {
-    
 }

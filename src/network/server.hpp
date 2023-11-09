@@ -17,7 +17,7 @@
 #include <boost/beast/ssl.hpp>
 #include <boost/asio/signal_set.hpp>
 
-namespace net = boost::asio;    
+namespace asio = boost::asio;    
 namespace ssl = boost::asio::ssl;     
 using tcp = boost::asio::ip::tcp; 
 
@@ -37,15 +37,15 @@ namespace server
                 config::DATABASE_PORT,
                 config::DATABASE_NAME);
         }
-        catch(const std::exception& e)
+        catch(const std::exception& ex)
         {
-            LOG_ERROR << e.what();
+            LOG_ERROR << ex.what();
             return;
         }
         
 
         // The io_context is required for all I/O
-        net::io_context io_context{config::THREADS_NUMBER};
+        asio::io_context io_context{config::THREADS_NUMBER};
 
         // The SSL context is required, and holds certificates
         ssl::context ssl_context{ssl::context::tlsv12};
@@ -63,10 +63,10 @@ namespace server
         std::make_shared<listener>(
             io_context,
             ssl_context,
-            tcp::endpoint{net::ip::make_address(config::SERVER_IP_ADDRESS), config::SERVER_PORT})->run();
+            tcp::endpoint{asio::ip::make_address(config::SERVER_IP_ADDRESS), config::SERVER_PORT})->run();
 
         // Capture SIGINT and SIGTERM to perform a clean shutdown
-        net::signal_set signals(io_context, SIGINT, SIGTERM);
+        asio::signal_set signals(io_context, SIGINT, SIGTERM);
         signals.async_wait(
             [&io_context](beast::error_code const&, int)
             {

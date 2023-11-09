@@ -1,6 +1,6 @@
 #include <network/listener.hpp>
 
-listener::listener(net::io_context& io_context, ssl::context& ssl_context, tcp::endpoint endpoint)
+listener::listener(asio::io_context& io_context, ssl::context& ssl_context, tcp::endpoint endpoint)
     :_io_context(io_context), _ssl_context(ssl_context), _acceptor(io_context)
 {
     beast::error_code error_code;
@@ -12,7 +12,7 @@ listener::listener(net::io_context& io_context, ssl::context& ssl_context, tcp::
         return;
     }
 
-    _acceptor.set_option(net::socket_base::reuse_address(true), error_code);
+    _acceptor.set_option(asio::socket_base::reuse_address(true), error_code);
     if (error_code)
     {
         LOG_ERROR << error_code.message();
@@ -26,7 +26,7 @@ listener::listener(net::io_context& io_context, ssl::context& ssl_context, tcp::
         return;
     }
 
-    _acceptor.listen(net::socket_base::max_listen_connections, error_code);
+    _acceptor.listen(asio::socket_base::max_listen_connections, error_code);
     if (error_code)
     {
         LOG_ERROR << error_code.message();
@@ -43,7 +43,7 @@ void listener::do_accept()
 {
     // Use make_strand to simplify work with access to shared resourses while using multiple threads
     _acceptor.async_accept(
-        net::make_strand(_io_context),
+        asio::make_strand(_io_context),
         beast::bind_front_handler(
             &listener::on_accept,
             shared_from_this()));
