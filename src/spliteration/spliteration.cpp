@@ -272,10 +272,19 @@ int8_t spliter::tokenize(std::vector <std::string>& result, std::string_view str
 
 size_t spliter::_my_find(std::string_view string_for_find, char char_to_find, size_t start_pos, size_t end_pos)
 {
-	return start_pos += ((string_for_find.substr(start_pos,end_pos)).find(char_to_find));
+	if (((string_for_find.substr(start_pos, end_pos - start_pos)).find(char_to_find)) != std::string::npos)
+	{
+		return start_pos += ((string_for_find.substr(start_pos, end_pos - start_pos)).find(char_to_find));
+	}
+	else
+		return std::string::npos;
 }
 
 size_t spliter::_my_find(std::string_view string_for_find, std::string_view string_to_find, size_t start_pos, size_t end_pos)
 {
-	return start_pos += ((string_for_find.substr(start_pos,end_pos)).find(string_to_find) + 1);
-}
+	if (((string_for_find.substr(start_pos, end_pos - start_pos)).find(string_to_find)) != std::string::npos)
+	{
+		return start_pos += ((string_for_find.substr(start_pos, end_pos - start_pos)).find(string_to_find));
+	}
+	else
+		return std::string::npos;}
