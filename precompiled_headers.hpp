@@ -15,6 +15,7 @@
 #include <optional>
 #include <variant>
 #include <queue>
+#include <filesystem>
 
 #include <unicode/unistr.h>
 #include <boost/regex.hpp>
@@ -45,5 +46,7 @@
 #include <logging/logger.hpp>
 #include <network/listener.hpp>
 #include <network/server_certificate.hpp>
+#include <jwt_utils/jwt_utils.hpp>
+#include <cookie_utils/cookie_utils.hpp>
 
 #endif

@@ -26,13 +26,13 @@ bool database::reconnect()
     return true;
 }
 
-std::optional<std::string> database::login(const std::string_view& username, const std::string_view& password)
+std::optional<size_t> database::login(const std::string_view& username, const std::string_view& password)
 {
     pqxx::work transaction{*_conn};
     
     try
     {
-        return transaction.query_value<std::string>(
+        return transaction.query_value<size_t>(
             "SELECT id FROM users WHERE nickname=" + transaction.quote(username) + 
             " AND password=crypt(" + transaction.quote(password) + ",password)");
     }
@@ -54,7 +54,7 @@ std::optional<std::string> database::login(const std::string_view& username, con
     // There are no users with given credentials
     catch (const pqxx::unexpected_rows&)
     {
-        return std::string{};
+        return 0;
     }
     catch (const std::exception& ex)
     {
@@ -63,17 +63,14 @@ std::optional<std::string> database::login(const std::string_view& username, con
     } 
 }
 
-std::optional<std::string> database::get_folder_path(const std::string& folder_id)
+std::optional<std::string> database::get_folder_path(size_t folder_id)
 {
     pqxx::work transaction{*_conn};
     
     try
     {
-        // Check if the folder_id is an unsigned number and throw on fail
-        pqxx::from_string<size_t>(folder_id);
-
         return transaction.query_value<std::string>(
-            "SELECT path FROM folders WHERE id=" + folder_id);
+            "SELECT path FROM folders WHERE id=" + pqxx::to_string(folder_id));
     }
     // Connection is lost
     catch (const pqxx::broken_connection& ex)
@@ -90,11 +87,6 @@ std::optional<std::string> database::get_folder_path(const std::string& folder_i
             return {};
         }
     }
-    // Folder id is not an unsigned number
-    catch (const pqxx::conversion_error&)
-    {
-        return std::string{};
-    }
     // Folder with given folder_id doesn't exist
     catch (const pqxx::unexpected_rows&)
     {
@@ -107,23 +99,14 @@ std::optional<std::string> database::get_folder_path(const std::string& folder_i
     } 
 }
 
-std::optional<std::pair<std::string, std::string>> database::insert_file(
-    const std::string& user_id, 
-    const std::string& folder_id, 
-    const std::string_view& filename)
+std::optional<bool> database::check_file_existence_by_name(size_t folder_id, const std::string_view& file_name)
 {
     pqxx::work transaction{*_conn};
     
     try
     {
-        // Check if the folder_id is an unsigned number and throw on fail
-        pqxx::from_string<size_t>(folder_id);
-
-        return transaction.query_value<std::string>(
-            "WITH current_id AS (SELECT nextval('files_id_seq')) INSERT INTO files (id,name,extension,path,folder_id," 
-            "uploaded_by_user_id) VALUES ((SELECT * FROM current_id)," + 
-            transaction.quote(filename.remove_suffix(filename.find_last_of('.'))) +
-            "," + config::FOLDERS_PATH + "(SELECT * FROM current_id)::text");
+        return transaction.query_value<bool>("SELECT EXISTS(SELECT 1 FROM files WHERE folder_id=" + 
+            pqxx::to_string(folder_id) + " AND name=" + transaction.quote(file_name) + ")");
     }
     // Connection is lost
     catch (const pqxx::broken_connection& ex)
@@ -132,7 +115,7 @@ std::optional<std::pair<std::string, std::string>> database::insert_file(
         
         if (reconnect())
         {
-            return insert_file(user_id, folder_id, filename);
+            return check_file_existence_by_name(folder_id, file_name);
         }
         else
         {
@@ -140,15 +123,133 @@ std::optional<std::pair<std::string, std::string>> database::insert_file(
             return {};
         }
     }
-    // Folder id is not an unsigned number
-    catch (const pqxx::conversion_error&)
+    catch (const std::exception& ex)
     {
-        return std::string{};
+        LOG_ERROR << ex.what();
+        return {};
     }
-    // Folder with given folder_id doesn't exist
-    catch (const pqxx::unexpected_rows&)
+}
+
+std::optional<std::pair<size_t, std::string>> database::insert_file(
+    size_t user_id, 
+    size_t folder_id,
+    const std::string_view& folder_path,
+    const std::string_view& file_name,
+    const std::string_view& file_extension)
+{
+    pqxx::work transaction{*_conn};
+    
+    try
     {
-        return std::string{};
+        auto [file_id, file_path] = transaction.query1<size_t, std::string>(
+            "WITH current_id AS (SELECT nextval('files_id_seq')) INSERT INTO files (id,name,extension," 
+            "path,folder_id,uploaded_by_user_id) VALUES ((SELECT * FROM current_id)," + 
+            transaction.quote(file_name) + "," + transaction.quote(file_extension) + "," + 
+            transaction.quote(folder_path) + "||(SELECT * FROM current_id)::text||'.'||" + 
+            transaction.quote(file_extension) + "," + pqxx::to_string(folder_id) + "," + 
+            pqxx::to_string(user_id) + ") RETURNING id, path");
+
+        transaction.commit();
+
+        return {{file_id, file_path}};
+    }
+    // Connection is lost
+    catch (const pqxx::broken_connection& ex)
+    {
+        transaction.abort();
+        
+        if (reconnect())
+        {
+            return insert_file(user_id, folder_id, folder_path, file_name, file_extension);
+        }
+        else
+        {
+            LOG_ERROR << ex.what();
+            return {};
+        }
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_ERROR << ex.what();
+        return {};
+    }
+}
+
+std::optional<bool> database::delete_file(size_t file_id)
+{
+    pqxx::work transaction{*_conn};
+    
+    try
+    {
+        _result = transaction.exec0("DELETE FROM files WHERE id=" + pqxx::to_string(file_id));
+        
+        transaction.commit();
+
+        if (_result.affected_rows())
+        {
+            return true;
+        }
+        else
+        {
+            return false;
+        }
+    }
+    // Connection is lost
+    catch (const pqxx::broken_connection& ex)
+    {
+        transaction.abort();
+        
+        if (reconnect())
+        {
+            return delete_file(file_id);
+        }
+        else
+        {
+            LOG_ERROR << ex.what();
+            return {};
+        }
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_ERROR << ex.what();
+        return {};
+    }
+}
+
+std::optional<bool> database::update_uploaded_file(size_t file_id, size_t file_size)
+{
+    pqxx::work transaction{*_conn};
+    
+    try
+    {
+        transaction.exec0("UPDATE files SET size=" + pqxx::to_string(file_size) +
+            ",upload_date=LOCALTIMESTAMP,status='uploaded' WHERE id=" + pqxx::to_string(file_id));
+        
+        transaction.commit();
+    
+        if (_result.affected_rows())
+        {
+            return true;
+        }
+        else
+        {
+            return false;
+        }
+    }
+    // Connection is lost
+    catch (const pqxx::broken_connection& ex)
+    {
+        transaction.abort();
+        
+        if (reconnect())
+        {
+            return update_uploaded_file(file_id, file_size);
+        }
+        else
+        {
+            LOG_ERROR << ex.what();
+            return {};
+        }
     }
     catch (const std::exception& ex)
     {

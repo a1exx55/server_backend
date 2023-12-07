@@ -291,28 +291,70 @@ std::string_view http_session::get_unparameterized_uri(const std::string_view& u
     return uri;
 }
 
-std::string_view http_session::get_path_parameter(const std::string_view& uri)
+template <typename param_value_t>
+bool http_session::get_path_parameter(
+    const std::string_view& uri, 
+    param_value_t& param_value_to_store)
 {
     // Start with position 5 because the uri has to start with /api/... and no need to capture these slashes
-    size_t delimiter_position = 5;
+    size_t slash_position = 5;
 
     // Skip the next slash as it is the part of the uri
-    delimiter_position = uri.find('/', 5);
+    slash_position = uri.find('/', 5);
 
     // If we didn't find the 4th slash in the uri then there is no path parameter
-    if ((delimiter_position = uri.find('/', delimiter_position + 1)) == std::string::npos)
+    if ((slash_position = uri.find('/', slash_position + 1)) == std::string::npos)
     {
-        return {};
+        return false;
     }
 
     // If we found the next slash then there are too many slashes for our uri
-    if (uri.find('/', delimiter_position + 1) != std::string::npos)
+    if (uri.find('/', slash_position + 1) != std::string::npos)
     {
-        return {};
+        return false;
     }
 
-    // Return everything after the last slash
-    return uri.substr(delimiter_position + 1);
+    // Path parameter is a string
+    if constexpr (std::is_same_v<param_value_t, std::string>)
+    {
+        param_value_to_store = uri.substr(slash_position + 1);
+    }
+    // Path parameter is a number
+    else if constexpr (std::is_integral_v<param_value_t>)
+    {
+        // Unsigned integers are got from string to uint64_t
+        if constexpr (std::is_unsigned_v<param_value_t>)
+        {
+            try
+            {
+                param_value_to_store = std::stoull(std::string{uri.substr(slash_position + 1)});
+            }
+            // Path parameter string value representation is not a number
+            catch (const std::exception&)
+            {
+                return false;
+            }
+        }
+        // Signed integers are got from string to int64_t
+        else if constexpr (std::is_signed_v<param_value_t>)
+        {
+            try
+            {
+                param_value_to_store = std::stoll(std::string{uri.substr(slash_position + 1)});
+            }
+            // Path parameter string value representation is not a number
+            catch (const std::exception&)
+            {
+                return false;
+            }
+        }
+    }
+    else
+    {
+        return false;
+    }
+
+    return true;
 }
 
 json::object http_session::get_query_parameters(const std::string_view& uri, size_t expected_params_number)
@@ -394,6 +436,200 @@ json::object http_session::get_query_parameters(const std::string_view& uri, siz
     return query_parameters;
 }
 
+template <typename param_value_t, typename... params_t>
+bool http_session::get_query_parameters(
+    const std::string_view& uri, 
+    const std::string_view& param_name, 
+    param_value_t& param_value_to_store, 
+    params_t&&... other_params) 
+{
+    size_t start_position{0}, equal_sign_position, end_position;
+
+    // Query parameter is a string
+    if constexpr (std::is_same_v<param_value_t, std::string>)
+    {
+        start_position = uri.find(param_name);
+
+        // No query parameter found
+        if (start_position == std::string::npos)
+        {
+            return false;
+        }
+
+        equal_sign_position = start_position + param_name.size();
+
+        // No equal sign so it is invalid format
+        if (equal_sign_position >= uri.size() || uri[equal_sign_position] != '=')
+        {
+            return false;
+        }
+
+        end_position = uri.find('&', equal_sign_position + 1);
+
+        param_value_to_store = uri.substr(equal_sign_position + 1, end_position - equal_sign_position - 1);
+    }
+    // Query parameter is a number
+    else if constexpr (std::is_integral_v<param_value_t>)
+    {
+        start_position = uri.find(param_name);
+
+        // No query parameter found
+        if (start_position == std::string::npos)
+        {
+            return false;
+        }
+
+        equal_sign_position = start_position + param_name.size();
+
+        // No equal sign so it is invalid format
+        if (equal_sign_position >= uri.size() || uri[equal_sign_position] != '=')
+        {
+            return false;
+        }
+
+        end_position = uri.find('&', equal_sign_position + 1);
+
+        // Unsigned integers are got from string to uint64_t
+        if constexpr (std::is_unsigned_v<param_value_t>)
+        {
+            try
+            {
+                param_value_to_store = std::stoull(
+                        std::string{uri.substr(equal_sign_position + 1, end_position - equal_sign_position - 1)},
+                        &start_position);
+
+                // Query parameter string value representation contains non digits after valid number
+                if (start_position != 
+                    uri.substr(equal_sign_position + 1, end_position - equal_sign_position - 1).size())
+                {
+                    return false;
+                }
+            }
+            // Query parameter string value representation is not a number
+            catch (const std::exception&)
+            {
+                return false;
+            }
+        }
+        // Signed integers are got from string to int64_t
+        else if constexpr (std::is_signed_v<param_value_t>)
+        {
+            try
+            {
+                param_value_to_store = std::stoll(
+                    std::string{uri.substr(equal_sign_position + 1, end_position - equal_sign_position - 1)});
+
+                // Query parameter string value representation contains non digits after valid number
+                if (start_position != 
+                    uri.substr(equal_sign_position + 1, end_position - equal_sign_position - 1).size())
+                {
+                    return false;
+                }
+            }
+            // Query parameter string value representation is not a number
+            catch (const std::exception&)
+            {
+                return false;
+            }
+        }
+    }
+    // Query parameter is an array(process only std::vector<>)
+    else if constexpr (std::is_same_v<
+        param_value_t, std::vector<typename param_value_t::value_type, typename param_value_t::allocator_type>>)
+    {
+        param_value_to_store.clear();
+
+        do
+        {
+            start_position = uri.find(param_name, start_position);
+
+            // No query parameter found
+            if (start_position == std::string::npos)
+            {
+                // There have to be some array query parameters with given name
+                if (param_value_to_store.empty())
+                {
+                    return false;
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            equal_sign_position = start_position + param_name.size() + 2;
+
+            // No equal sign so it is invalid format
+            if (equal_sign_position >= uri.size() || uri[equal_sign_position] != '=')
+            {
+                return false;
+            }
+
+            // Array parameter name has to be followed by []
+            if (uri.substr(equal_sign_position - 2, 2) != "[]")
+            {
+                return false;
+            }
+
+            end_position = start_position = uri.find('&', equal_sign_position + 1);
+
+            // Array elements type is a string
+            if constexpr (std::is_same_v<typename param_value_t::value_type, std::string>)
+            {
+                param_value_to_store.emplace_back(
+                    uri.substr(equal_sign_position + 1, end_position - equal_sign_position - 1));
+            }
+            //Array elements type is a number
+            else if constexpr (std::is_integral_v<typename param_value_t::value_type>)
+            {
+                // Unsigned integers are got from string to uint64_t
+                if constexpr (std::is_unsigned_v<typename param_value_t::value_type>)
+                {
+                    try
+                    {
+                        param_value_to_store.emplace_back(std::stoull(std::string{uri.substr(
+                            equal_sign_position + 1, end_position - equal_sign_position - 1)}));
+                    }
+                    // Query parameter string value representation is not a number
+                    catch (const std::exception&)
+                    {
+                        return false;
+                    }
+                }
+                // Signed integers are got from string to int64_t
+                else if constexpr (std::is_signed_v<typename param_value_t::value_type>)
+                {
+                    try
+                    {
+                        param_value_to_store.emplace_back(std::stoll(std::string{uri.substr(
+                            equal_sign_position + 1, end_position - equal_sign_position - 1)}));
+                    }
+                    // Query parameter string value representation is not a number
+                    catch (const std::exception&)
+                    {
+                        return false;
+                    }
+                }
+            }
+        } while (end_position != std::string::npos);  
+    }
+    else
+    {
+        return false;
+    }
+
+    // Call the same function if there are query parameters left to process
+    if constexpr (sizeof...(other_params) > 0) 
+    {
+        if (!get_query_parameters(uri, std::forward<params_t>(other_params)...))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 bool http_session::validate_request_attributes(bool has_body)
 {
     // Request with body
@@ -417,14 +653,14 @@ bool http_session::validate_request_attributes(bool has_body)
             return false;
         }
 
-        // Forbid requests with body size more than 1 MB(there is exception for uploading files)
-        if (*_request_parser->content_length() > 1024 * 1024)
-        {
-            prepare_error_response(
-                http::status::payload_too_large, 
-                "Too large body size");
-            return false;
-        }
+        // // Forbid requests with body size more than 1 MB(there is exception for uploading files)
+        // if (*_request_parser->content_length() > 1024 * 1024)
+        // {
+        //     prepare_error_response(
+        //         http::status::payload_too_large, 
+        //         "Too large body size");
+        //     return false;
+        // }
 
         return true;
     }
@@ -478,7 +714,7 @@ bool http_session::validate_jwt_token(jwt_token_type token_type)
             if (_request_parser->get()[http::field::authorization].size() < 8 || 
                 !jwt_utils::is_token_valid(_request_parser->get()[http::field::authorization].substr(7)))
             {
-                prepare_error_response(http::status::unauthorized, "Invalid accessToken");
+                prepare_error_response(http::status::unauthorized, "Invalid access token");
                 return false;
             }
 
@@ -494,7 +730,7 @@ bool http_session::validate_jwt_token(jwt_token_type token_type)
                     _request_parser->get()[http::field::cookie], 
                     "refreshToken")}))
             {
-                prepare_error_response(http::status::unauthorized, "Invalid refreshToken");
+                prepare_error_response(http::status::unauthorized, "Invalid refresh token");
                 return false;
             }
 
@@ -510,18 +746,13 @@ bool http_session::validate_jwt_token(jwt_token_type token_type)
 
 void http_session::download_files()
 {
-    std::string folder_id;
+    size_t folder_id;
 
-    try
-    {
-        folder_id = get_query_parameters(_request_parser->get().target())
-            .at("folderId").as_string().data();
-    }
-    catch (const std::exception&)
+    if (!get_query_parameters(_request_parser->get().target(), "folderId", folder_id))
     {
         prepare_error_response(
             http::status::unprocessable_entity, 
-            "Invalid folder id");
+            "Invalid folder id as query parameter");
         return do_write_response(false);
     }
 
@@ -541,6 +772,8 @@ void http_session::download_files()
     // An error occured with database connection
     if (!folder_path)
     {
+        database_pool::release(std::move(db));
+
         prepare_error_response(
             http::status::internal_server_error, 
             "Internal server error occured");
@@ -550,9 +783,11 @@ void http_session::download_files()
     // Folder with folder_id doesn't exist
     if (*folder_path == "")
     {
+        database_pool::release(std::move(db));
+
         prepare_error_response(
             http::status::unprocessable_entity, 
-            "Invalid folder id");
+            "Invalid folder id as query parameter");
         return do_write_response(false);
     }
     
@@ -571,6 +806,8 @@ void http_session::download_files()
     // Boundary was not found in the content type
     if (boundary_position == std::string::npos)
     {
+        database_pool::release(std::move(db));
+
         prepare_error_response(
             http::status::unprocessable_entity, 
             "Invalid Content-Type");
@@ -583,89 +820,103 @@ void http_session::download_files()
     // Declare file variable to write obtained data to the corresponding files 
     std::ofstream file;
 
-    // Store the paths for all downloaded files to process them afterward
-    std::queue<std::string> file_ids_and_paths;
+    // Store the ids and paths for all downloaded files to process them afterward(e.g. to recode or unzip for archives)
+    std::list<std::pair<size_t, std::string>> file_ids_and_paths;
 
     // Set the timeout
     beast::get_lowest_layer(_stream).expires_after(std::chrono::seconds(30));
 
     // Read the boundary before the first header of file 
-    asio::async_read_until(_stream, buffer, boundary, beast::bind_front_handler(
-    [this, self = shared_from_this()](
-        dynamic_buffer&& buffer, 
-        std::string_view boundary,
-        std::string&& folder_id,
-        std::string&& folder_path, 
-        std::ofstream&& file, 
-        std::queue<std::pair<std::string, std::string>>&& file_ids_and_paths,
-        beast::error_code error_code, std::size_t bytes_transferred)
-    {
-        if (error_code)
-        {
-            return do_close();
-        }
+    asio::async_read_until(_stream, buffer, boundary, 
+        beast::bind_front_handler(
+            [this, self = shared_from_this()](
+                dynamic_buffer&& buffer, 
+                std::string_view&& boundary,
+                size_t folder_id,
+                std::string&& folder_path, 
+                std::ofstream&& file, 
+                std::unique_ptr<database>&& db,
+                std::list<std::pair<size_t, std::string>>&& file_ids_and_paths,
+                beast::error_code error_code, std::size_t bytes_transferred)
+            {
+                if (error_code)
+                {
+                    database_pool::release(std::move(db));
 
-        // Consume read bytes as it is just the boundary
-        buffer.consume(bytes_transferred);
+                    return do_close();
+                }
 
-        // Set the timeout
-        beast::get_lowest_layer(_stream).expires_after(std::chrono::seconds(30));
+                // Consume read bytes as it is just the boundary
+                buffer.consume(bytes_transferred);
 
-        // Read the first file header obtaining bytes until the empty string 
-        // that represents the delimeter between file header and data itself
-        asio::async_read_until(_stream, buffer, "\r\n\r\n", beast::bind_front_handler( 
-            &http_session::handle_file_header, 
-            shared_from_this(), 
+                // Set the timeout
+                beast::get_lowest_layer(_stream).expires_after(std::chrono::seconds(30));
+
+                // Read the first file header obtaining bytes until the empty string 
+                // that represents the delimeter between file header and data itself
+                asio::async_read_until(_stream, buffer, "\r\n\r\n", 
+                    beast::bind_front_handler( 
+                        &http_session::handle_file_header, 
+                        shared_from_this(), 
+                        std::move(buffer), 
+                        std::move(boundary), 
+                        folder_id, 
+                        std::move(folder_path), 
+                        std::move(file),
+                        std::move(db),
+                        std::move(file_ids_and_paths)));
+            }, 
             std::move(buffer), 
             std::move(boundary), 
-            std::move(folder_id), 
-            std::move(folder_path), 
+            folder_id, 
+            std::move(*folder_path), 
             std::move(file),
+            std::move(db),
             std::move(file_ids_and_paths)));
-
-    }, 
-    std::move(buffer), 
-    std::move(boundary), 
-    std::move(folder_id), 
-    std::move(*folder_path), 
-    std::move(file),
-    std::move(file_ids_and_paths)));
     
 }
 
 void http_session::handle_file_header(
     dynamic_buffer&& buffer, 
-    std::string_view boundary,
-    std::string&& folder_id,
+    std::string_view&& boundary,
+    size_t folder_id,
     std::string&& folder_path, 
-    std::ofstream&& file, 
-    std::queue<std::pair<std::string, std::string>>&& file_ids_and_paths,
+    std::ofstream&& file,
+    std::unique_ptr<database>&& db, 
+    std::list<std::pair<size_t, std::string>>&& file_ids_and_paths,
     beast::error_code error_code, std::size_t bytes_transferred)
 {
     if (error_code)
     {
+        database_pool::release(std::move(db));
+
         // If there are downloaded files then start separately processing them and close the connection
         if (!file_ids_and_paths.empty())
         {
-            std::thread{request_handlers::process_downloaded_files, std::move(file_ids_and_paths)};
+            std::thread{request_handlers::process_downloaded_files, std::move(file_ids_and_paths)}.detach();
         }
 
         return do_close();
     }
 
+    // Reset the timeout
+    beast::get_lowest_layer(_stream).expires_never();
+
     // Construct the string representation of buffer
     std::string_view string_buffer{asio::buffer_cast<const char*>(buffer.data()), bytes_transferred};
 
     // Position of the filename field in the file header
-    size_t filename_position = string_buffer.find("filename");
+    size_t file_name_position = string_buffer.find("filename");
 
-    // Filename field is absent
-    if (filename_position == std::string::npos)
+    // filename field is absent
+    if (file_name_position == std::string::npos)
     {
+        database_pool::release(std::move(db));
+
         // If there are downloaded files then start separately processing them and return response
         if (!file_ids_and_paths.empty())
         {
-            std::thread{request_handlers::process_downloaded_files, std::move(file_ids_and_paths)};
+            std::thread{request_handlers::process_downloaded_files, std::move(file_ids_and_paths)}.detach();
         }
 
         prepare_error_response(
@@ -675,100 +926,352 @@ void http_session::handle_file_header(
     }
 
     // Shift to the filename itself(e.g. filename="file.txt")
-    filename_position += 10;
+    file_name_position += 10;
 
-    auto db = database_pool::get();
+    size_t user_id;
 
-    // No available connections
-    if (!db)
+    // This error means that access token was somehow generated incorrectly
+    if (!jwt_utils::get_token_claim(
+        std::string{_request_parser->get()[http::field::authorization].substr(7)}, 
+        "userId", 
+        user_id))
     {
+        database_pool::release(std::move(db));
+
         // If there are downloaded files then start separately processing them and return response
         if (!file_ids_and_paths.empty())
         {
-            std::thread{request_handlers::process_downloaded_files, std::move(file_ids_and_paths)};
+            std::thread{request_handlers::process_downloaded_files, std::move(file_ids_and_paths)}.detach();
         }
 
         prepare_error_response(
-            http::status::internal_server_error, 
-            "No available database connections");
+            http::status::unauthorized, 
+            "Invalid access token");
         return do_write_response(false);
     }
 
-    // auto file_id_and_path = db->insert_file(
-    //     jwt_utils::get_token_payload()
-    // )
+    std::string file_name = std::string{string_buffer.substr(
+        file_name_position, string_buffer.find('"', file_name_position) - file_name_position)};
+    file_name_position = file_name.find_last_of('.');
+    std::string file_extension = file_name.substr(file_name_position + 1);
+    file_name = file_name.substr(0, file_name_position);
 
-    // Open the file by found filename
-    file.open(std::string{string_buffer.substr(filename_position, string_buffer.find(
-        '"', filename_position) - filename_position)}, std::ios::binary);
-
-    if (!file.is_open())
+    static const std::unordered_set<std::string> allowed_file_extensions
     {
-        prepare_error_response(http::status::not_found, "Invalid filename");
-        do_write_response(false);
-        return;
+        "csv", "txt", "zip", "sql", "xlsx", "xls"
+    };
+
+    // Invalid file extension
+    if (!allowed_file_extensions.contains(file_extension))
+    {
+        database_pool::release(std::move(db));
+
+        // If there are downloaded files then start separately processing them and return response
+        if (!file_ids_and_paths.empty())
+        {
+            std::thread{request_handlers::process_downloaded_files, std::move(file_ids_and_paths)}.detach();
+        }
+
+        prepare_error_response(
+            http::status::unprocessable_entity, 
+            "Filename contains invalid extension ." + std::string{file_extension});
+        return do_write_response(false);
     }
+
+    // Check if the string contains only space symbols
+    // In this case consider it as the empty string and assign it with "(1)" like it is the copy of empty string 
+    // because it is forbidden to have empty file name
+    if (std::all_of(file_name.begin(), file_name.end(), [](unsigned char c) { return std::isspace(c); }))
+    {
+        file_name = "(1)";
+    }
+
+    // Transform the string to UnicodeString to work with any unicode symbols
+    icu::UnicodeString file_name_unicode{file_name.c_str()};
+
+    // Trim the string to the allowed length limit
+    if (file_name_unicode.length() > 64)
+    {
+        file_name_unicode.retainBetween(0, 64);
+    }
+
+    file_name.clear();
+    file_name_unicode.toUTF8String(file_name);
+
+    std::optional<bool> does_file_exist;
+    size_t opening_bracket, copy_number, non_digit_pos;
+
+    // Check if the file with specified name exists in database
+    // If so we create names with copies by adding number after it: test.txt -> test(1).txt -> test(2).txt
+    // until the modified name is available in database
+    while (true)    
+    {
+        does_file_exist = db->check_file_existence_by_name(folder_id, file_name);
+
+        if (!does_file_exist)
+        {
+            database_pool::release(std::move(db));
+
+            // If there are downloaded files then start separately processing them and return response
+            if (!file_ids_and_paths.empty())
+            {
+                std::thread{request_handlers::process_downloaded_files, std::move(file_ids_and_paths)}.detach();
+            }
+            
+            prepare_error_response(
+                http::status::internal_server_error, 
+                "Internal server error occured");
+            return do_write_response(false);
+        }
+
+        // We found the available file name so stop creating copies
+        if (!*does_file_exist)
+        {
+            break;
+        }
+
+        // If couldn't find opening and closing brackets then there is no copy yet
+        // so just append '(1)' to the end of the file name
+        if (file_name.back() == ')' && 
+            (opening_bracket = file_name.rfind('(', file_name.size() - 2)) != std::string::npos)
+        {
+            try
+            {
+                // Try to consider data between opening and closing brackets as copy number
+                copy_number = std::stoull(
+                    file_name.substr(opening_bracket + 1, file_name.size() - opening_bracket - 2), &non_digit_pos);
+
+                // Copy number string contains non digits after valid number
+                if (non_digit_pos != 
+                    file_name.substr(opening_bracket + 1, file_name.size() - opening_bracket - 2).size())
+                {
+                    throw std::exception{};
+                }
+
+                // If copy number is valid then just increment it by one in the file name
+                file_name.replace(
+                    opening_bracket + 1, file_name.size() - opening_bracket - 2, std::to_string(copy_number + 1));
+            }
+            // If we got here then the copy number is not valid(e.g. the brackets don't represent the copy number
+            // but just are the part of the file name data - 'test(modified).txt') 
+            // so just append the '(1)' to the end of the file name
+            catch (const std::exception&)
+            {
+                file_name.append("(1)");
+            }
+        }
+        else
+        {
+            file_name.append("(1)");
+        }       
+    }
+
+    std::optional<std::pair<size_t, std::string>> file_id_and_path = db->insert_file(
+        user_id,
+        folder_id,
+        folder_path,
+        file_name,
+        file_extension);
+
+    // An error occured with database connection
+    if (!file_id_and_path)
+    {
+        database_pool::release(std::move(db));
+
+        // If there are downloaded files then start separately processing them and return response
+        if (!file_ids_and_paths.empty())
+        {
+            std::thread{request_handlers::process_downloaded_files, std::move(file_ids_and_paths)}.detach();
+        }
+        
+        prepare_error_response(
+            http::status::internal_server_error, 
+            "Internal server error occured");
+        return do_write_response(false);
+    }
+
+    // Create and open the file to write the obtaining data
+    file.open(file_id_and_path->second, std::ios::binary);
+
+    // Store id and path of the current file to process it after the download(e.g. to recode or unzip for archives)
+    file_ids_and_paths.emplace_back(*file_id_and_path);
 
     // Consume the file header bytes 
     buffer.consume(bytes_transferred);
 
+    // Set the timeout
+    beast::get_lowest_layer(_stream).expires_after(std::chrono::seconds(30));
+
     // Read the file data obtaining bytes until the boundary that represents the end of file
-    asio::async_read_until(_stream, buffer, boundary, beast::bind_front_handler( 
-        &http_session::handle_file_data, 
-        shared_from_this(), 
-        std::move(buffer), std::move(boundary), std::move(file)));
+    asio::async_read_until(_stream, buffer, boundary, 
+        beast::bind_front_handler( 
+            &http_session::handle_file_data, 
+            shared_from_this(), 
+            std::move(buffer), 
+            std::move(boundary), 
+            folder_id, 
+            std::move(folder_path), 
+            std::move(file),
+            std::move(db),
+            std::move(file_ids_and_paths)));
 }
 
 void http_session::handle_file_data(
     dynamic_buffer&& buffer, 
-    std::string_view boundary,
-    std::string&& folder_id,
+    std::string_view&& boundary,
+    size_t folder_id,
     std::string&& folder_path, 
-    std::ofstream&& file, 
-    std::queue<std::pair<std::string, std::string>>&& file_ids_and_paths,
+    std::ofstream&& file,
+    std::unique_ptr<database>&& db, 
+    std::list<std::pair<size_t, std::string>>&& file_ids_and_paths,
     beast::error_code error_code, std::size_t bytes_transferred)
 {
     // File can't be read at once as it is too big(>10Mb)
-    // Process read segment and go on reading
+    // Process obtained packet and go on reading
     if (error_code == asio::error::not_found)
     {
-        file.write(asio::buffer_cast<const char*>(buffer.data()), buffer.size());
-        buffer.consume(buffer.size());
+        // Write obtained packet to the file
+        // Don't touch last symbols with boundary length as we could stop in the middle of boundary
+        // so we would write to the file the part of boundary 
+        file.write(asio::buffer_cast<const char*>(buffer.data()), buffer.size() - boundary.size());
 
-        asio::async_read_until(_stream, buffer, boundary, beast::bind_front_handler( 
-            &http_session::handle_file_data, 
-            shared_from_this(), 
-            std::move(buffer), std::move(boundary), std::move(file)));
+        // Consume written bytes
+        buffer.consume(buffer.size() - boundary.size());
+
+        // Set the timeout
+        beast::get_lowest_layer(_stream).expires_after(std::chrono::seconds(30));
+
+        // Read the next data until either we find a boundary or read the packet of maximum size again 
+        asio::async_read_until(_stream, buffer, boundary, 
+            beast::bind_front_handler( 
+                &http_session::handle_file_data, 
+                shared_from_this(), 
+                std::move(buffer), 
+                std::move(boundary), 
+                folder_id, 
+                std::move(folder_path), 
+                std::move(file),
+                std::move(db),
+                std::move(file_ids_and_paths)));
         return;
     }
 
+    // Define actions to clean up all the data about the file
+    auto process_file_cleanup = 
+    [&]
+    {
+        // Remove the file from the file system
+        try
+        {
+            std::filesystem::remove(file_ids_and_paths.back().second);
+        }
+        catch (const std::exception& ex)
+        {
+            LOG_ERROR << ex.what();
+        }
+
+        // Delete the file from the database
+        db->delete_file(file_ids_and_paths.back().first);
+
+        // Remove the file from the list of downloaded files 
+        file_ids_and_paths.pop_back();
+
+        // If there are downloaded files then start separately processing them and return response
+        if (!file_ids_and_paths.empty())
+        {
+            std::thread{request_handlers::process_downloaded_files, std::move(file_ids_and_paths)}.detach();
+        }
+    };
+
+    // Unexpected error occured so clean up everything about not downloaded file
     if (error_code)
     {
-        prepare_error_response(http::status::not_found, "Invalid Content-Type");
-        do_write_response(false);
-        return;
+        file.close();
+
+        process_file_cleanup();
+
+        database_pool::release(std::move(db));
+
+        return do_close();
     }
 
-    // Write obtained bytes to the file excluding boundary and empty string in the end
-    file.write(asio::buffer_cast<const char*>(buffer.data()), bytes_transferred - boundary.size() - 4);
+    // Reset the timeout
+    beast::get_lowest_layer(_stream).expires_never();
 
-    // Consume file data bytes
-    buffer.consume(bytes_transferred); 
+   // Write obtained bytes to the file excluding CRLF after the file data and -- followed by boundary
+   // -- is the part of the boundary, used only in body, so we have to consider this -- length because
+   // boudary variable doesn't contain it
+    file.write(asio::buffer_cast<const char*>(buffer.data()), bytes_transferred - boundary.size() - 4);
 
     // Close the file as its downloading is over
     file.close();
 
-    // If there is "--" after the boundary then request body is over
+    // Consume obtained bytes
+    buffer.consume(bytes_transferred); 
+
+    size_t file_size;
+
+    // Determine the file size of just downloaded file
+    try
+    {
+        file_size = std::filesystem::file_size(file_ids_and_paths.back().second);
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_ERROR << ex.what();
+
+        process_file_cleanup();
+   
+        database_pool::release(std::move(db));
+
+        prepare_error_response(
+            http::status::internal_server_error, 
+            "Internal server error occured");
+        return do_write_response(false);
+    }
+
+    // Update the data about just downloaded file
+    if (!db->update_uploaded_file(file_ids_and_paths.back().first, file_size))
+    {
+        process_file_cleanup();
+   
+        database_pool::release(std::move(db));
+
+        prepare_error_response(
+            http::status::internal_server_error, 
+            "Internal server error occured");
+        return do_write_response(false);
+    }
+
+    // If there is "--" after the boundary then there are no more files and request body is over
+    // So start processing downloaded files and send response
     if (std::string_view{asio::buffer_cast<const char*>(buffer.data()), buffer.size()} == "--\r\n")
     {
-        prepare_error_response(http::status::ok, "Success");
-        do_write_response(true);
-        return;
+        database_pool::release(std::move(db));
+
+        std::thread{request_handlers::process_downloaded_files, std::move(file_ids_and_paths)}.detach();
+
+        _response.erase(http::field::set_cookie);
+        _response.result(http::status::ok);
+        _response.body().clear(); 
+        _response.prepare_payload();
+
+        return do_write_response(true);
     }
     
+    // Set the timeout
+    beast::get_lowest_layer(_stream).expires_after(std::chrono::seconds(30));
+    
     // Read the next file header
-    asio::async_read_until(_stream, buffer, "\r\n\r\n", beast::bind_front_handler( 
-        &http_session::handle_file_header, 
-        shared_from_this(), 
-        std::move(buffer), std::move(boundary), std::move(file)));
+    asio::async_read_until(_stream, buffer, "\r\n\r\n", 
+        beast::bind_front_handler( 
+            &http_session::handle_file_header, 
+            shared_from_this(), 
+            std::move(buffer), 
+            std::move(boundary), 
+            folder_id, 
+            std::move(folder_path), 
+            std::move(file),
+            std::move(db),
+            std::move(file_ids_and_paths)));
 }

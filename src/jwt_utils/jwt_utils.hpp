@@ -24,9 +24,66 @@ class jwt_utils
         // Return token payload as json object
         static json::object get_token_payload(const std::string& token);
 
-        // Return token payload claim 
-        static json::object get_token_claim(const std::string& token, const std::string& claim_name);
+        // Match token claim by its name to the claim_value_to_store variable, converting it to this variable type
+        // Return true on successfull conversion and assignment otherwise return false
+        template <typename param_value_t>
+        static bool get_token_claim(
+            const std::string& token, 
+            const std::string_view& claim_name,
+            param_value_t& claim_value_to_store)
+        {
+            // Token claim is a string
+            if constexpr (std::is_same_v<param_value_t, std::string>)
+            {
+                try
+                {
+                    claim_value_to_store = jwt::decode<traits>(token).get_payload_json().at(claim_name).as_string().data();
+                }
+                // Either claim_name is not found in json or it is not a string 
+                catch(const std::exception&)
+                {
+                    return false;
+                }   
+            }
+            // Token claim is a number
+            else if constexpr (std::is_integral_v<param_value_t>)
+            {
+                // Unsigned integers are got from string to uint64_t
+                if constexpr (std::is_unsigned_v<param_value_t>)
+                {
+                    try
+                    {
+                        claim_value_to_store = jwt::decode<traits>(token).get_payload_json()
+                            .at(claim_name).to_number<param_value_t>();
+                    }
+                    // Either claim_name is not found in json or it is not a unsigned number 
+                    catch (const std::exception&)
+                    {
+                        return false;
+                    }
+                }
+                // Signed integers are got from string to int64_t
+                else if constexpr (std::is_signed_v<param_value_t>)
+                {
+                    try
+                    {
+                        claim_value_to_store = jwt::decode<traits>(token).get_payload_json()
+                            .at(claim_name).to_number<param_value_t>();
+                    }
+                    // Either claim_name is not found in json or it is not a signed number 
+                    catch (const std::exception&)
+                    {
+                        return false;
+                    }
+                }
+            }
+            else
+            {
+                return false;
+            }
 
+            return true;
+        }
         // Check if token is valid
         static bool is_token_valid(const std::string &token);
 

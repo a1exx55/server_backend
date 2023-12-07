@@ -30,7 +30,7 @@ namespace request_handlers
         http::response<http::string_body>& response);
 
     void process_downloaded_files(
-        std::queue<std::pair<std::string, std::string>>&& file_ids_and_paths);
+        std::list<std::pair<size_t, std::string>>&& file_ids_and_paths);
 
     void prepare_error_response(
         http::response<http::string_body>& response, 

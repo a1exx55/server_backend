@@ -46,7 +46,7 @@ void request_handlers::handle_login(
         }
 
         // User's credentials are invalid
-        if (*user_id == "")
+        if (*user_id == 0)
         {
             prepare_error_response(response, http::status::unauthorized, "Invalid login credentials");
             return;
@@ -110,6 +110,6 @@ void request_handlers::handle_sessions_info(
     
 }
 
-void request_handlers::process_downloaded_files(std::queue<std::pair<std::string,std::string>>&& file_ids_and_paths)
+void request_handlers::process_downloaded_files(std::list<std::pair<size_t, std::string>>&& file_ids_and_paths)
 {
 }
