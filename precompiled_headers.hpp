@@ -28,6 +28,7 @@
 #include <boost/asio/dispatch.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/beast/http.hpp>
+#include <boost/beast/http/status.hpp>
 #include <boost/asio/read_until.hpp>
 #include <boost/json.hpp>
 #include <boost/functional/hash.hpp>
@@ -48,5 +49,6 @@
 #include <network/server_certificate.hpp>
 #include <jwt_utils/jwt_utils.hpp>
 #include <cookie_utils/cookie_utils.hpp>
+#include <network/request_and_response_params.hpp>
 
 #endif

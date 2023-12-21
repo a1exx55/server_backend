@@ -18,6 +18,8 @@ namespace config
     inline constexpr std::string DATABASE_PASSWORD{"oral"};
     inline const std::string FOLDERS_PATH{"/home/dmitry/drains/"};
     inline const std::string LOG_FILE_PATH{"/home/dmitry/vscodeprojects/dataleak_parser/server_backend.log"};
+    inline const std::string SSL_CERT_PATH{"/etc/ssl/ocsearch.crt"};
+    inline const std::string SSL_KEY_PATH{"/etc/ssl/ocsearch.key"};
     inline constexpr bool CONSOLE_LOG_ENABLED{true};
     inline constexpr std::string JWT_SECRET_KEY{"secret_key"};
     inline constexpr std::chrono::minutes ACCESS_TOKEN_EXPIRY_TIME{15};

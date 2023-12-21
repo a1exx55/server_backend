@@ -10,6 +10,13 @@
 using traits = jwt::traits::boost_json;
 namespace json = boost::json;
 
+enum class jwt_token_type
+{
+    NO = 0,
+    ACCESS_TOKEN,
+    REFRESH_TOKEN
+};
+
 class jwt_utils
 { 
     public:
@@ -17,19 +24,21 @@ class jwt_utils
         // Return a pair of access and refresh tokens respectively
         static std::pair<std::string, std::string> create_tokens(const json::object& custom_claims);
         
-        // Use refresh token to get its custom claims and construct tokens payload(the same payload in both except expiry time)
+        // Use refresh token to get its custom claims and construct tokens payload
+        // (the same payload in both except expiry time)
         // Return a pair of access and refresh tokens respectively
         static std::pair<std::string, std::string> refresh_tokens(const std::string& refresh_token);
 
         // Return token payload as json object
         static json::object get_token_payload(const std::string& token);
 
-        // Match token claim by its name to the claim_value_to_store variable, converting it to this variable type
+        // Get token claim by its name and assign it to the claim_value_to_store variable, 
+        // converting claim to the variable type
         // Return true on successfull conversion and assignment otherwise return false
         template <typename param_value_t>
         static bool get_token_claim(
             const std::string& token, 
-            const std::string_view& claim_name,
+            std::string_view claim_name,
             param_value_t& claim_value_to_store)
         {
             // Token claim is a string
@@ -93,13 +102,6 @@ class jwt_utils
         inline static const jwt::verifier<jwt::default_clock, traits> _verifier{jwt::verify<traits>()
 		    .allow_algorithm(_crypto_algrorithm)};
 
-};
-
-enum class jwt_token_type
-{
-    NO = 0,
-    ACCESS_TOKEN,
-    REFRESH_TOKEN
 };
 
 #endif

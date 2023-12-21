@@ -16,12 +16,12 @@ class database_pool
         // Each database is initialized with given parameters
         // Since database class constructor can throw exception, database_pool can do it either
         static void init(
-            const size_t databases_number,
-            const std::string& username, 
-            const std::string& password, 
-            const std::string& host, 
-            const size_t port,
-            const std::string& database_name);
+            size_t databases_number,
+            std::string_view username, 
+            std::string_view password, 
+            std::string_view host, 
+            size_t port,
+            std::string_view database_name);
 
         // Return database object from the pool wrapped in unique_ptr
         // If there are no free databases in the pool then it return empty constructed unique_ptr(nullptr)

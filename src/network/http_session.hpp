@@ -6,6 +6,8 @@
 #include <config.hpp>
 #include <jwt_utils/jwt_utils.hpp>
 #include <request_handlers/request_handlers.hpp>
+#include <network/request_and_response_params.hpp>
+#include <network/uri_params.hpp>
 
 //internal
 #include <fstream>
@@ -30,14 +32,12 @@
 
 namespace beast = boost::beast;  
 namespace http = boost::beast::http;      
-namespace asio = boost::asio;            
+namespace asio = boost::asio; 
 namespace ssl = boost::asio::ssl;
-namespace json = boost::json;   
+namespace json = boost::json;
 
 using tcp = boost::asio::ip::tcp;
-using request_handler_t = std::function<void(
-                const http::request_parser<http::string_body>&, 
-                http::response<http::string_body>&)>;
+using request_handler_t = std::function<void(const request_params&, response_params&)>;
 using dynamic_buffer = asio::dynamic_string_buffer<char, std::char_traits<char>, std::allocator<char>>;
 
 class http_session : public std::enable_shared_from_this<http_session>
@@ -53,6 +53,8 @@ class http_session : public std::enable_shared_from_this<http_session>
         
         void on_handshake(beast::error_code error_code);
 
+        void set_request_props();
+
         void do_read_header();
 
         void on_read_header(beast::error_code error_code, std::size_t bytes_transferred);
@@ -64,7 +66,7 @@ class http_session : public std::enable_shared_from_this<http_session>
             beast::error_code error_code, 
             std::size_t bytes_transferred);
 
-        void prepare_error_response(const http::status response_status, const std::string_view& error_message);
+        void prepare_error_response(const http::status response_status, std::string_view error_message);
 
         void do_write_response(bool keep_alive = true);
 
@@ -72,26 +74,9 @@ class http_session : public std::enable_shared_from_this<http_session>
 
         void do_close();
 
-        // Return the uri excluding query or path parameters
-        static std::string_view get_unparameterized_uri(const std::string_view& uri);
+        void parse_request_params();
 
-        // Match the path parameter to the given param_value_to_store, converting it to this variable type
-        // Return true on successful conversion and assignment otherwise return false
-        template <typename param_value_t>
-        static bool get_path_parameter(
-            const std::string_view& uri, 
-            param_value_t& param_value_to_store);
-
-        static json::object get_query_parameters(const std::string_view& uri, size_t expected_params_number = 1);
-
-        // Match each query parameter by its name to the corresponding variable, converting it to this variable type
-        // Return true on all successful conversions and assignments otherwise return false
-        template <typename param_value_t, typename... params_t>
-        static bool get_query_parameters(
-            const std::string_view& uri, 
-            const std::string_view& param_name, 
-            param_value_t& param_value_to_store, 
-            params_t&&... other_params);
+        void parse_response_params();
 
         // Handle unexpected request attributes depending on whether the body is present or not
         bool validate_request_attributes(bool has_body);
@@ -130,26 +115,48 @@ class http_session : public std::enable_shared_from_this<http_session>
         // Wrap in std::optional to use parser several times by invoking .emplace() every request
         std::optional<http::request_parser<http::string_body>> _request_parser;
         http::response<http::string_body> _response;
+        // Encapsulation of request and response params to pass them to request handlers 
+        // to avoid direct access to _request_parser and _response
+        request_params _request_params;
+        response_params _response_params;
         
         // This map is used to determine what to do depends on the header target value
         inline static const std::unordered_map<
-            std::pair<std::string_view, http::verb>, 
+            std::tuple<std::string_view, http::verb, uri_params::type>, 
             std::tuple<bool, jwt_token_type, const request_handler_t>, 
-            boost::hash<std::pair<std::string_view, http::verb>>> _requests_metadata
+            boost::hash<std::tuple<std::string_view, http::verb, uri_params::type>>> _requests_metadata
         {
             {
-                {"/api/user/login", http::verb::post},
-                {true, jwt_token_type::NO, request_handlers::handle_login}
+                {"/api/user/login", http::verb::post, uri_params::type::NO},
+                {true, jwt_token_type::NO, request_handlers::login}
             },
             {
-                {"/api/user/logout", http::verb::post},
-                {false, jwt_token_type::ACCESS_TOKEN, request_handlers::handle_logout}
+                {"/api/user/logout", http::verb::post, uri_params::type::NO},
+                {false, jwt_token_type::REFRESH_TOKEN, request_handlers::logout}
             },
             {
-                {"/api/file_system/files", http::verb::post},
-                {true, jwt_token_type::ACCESS_TOKEN, [](
-                    const http::request_parser<http::string_body>&, 
-                    http::response<http::string_body>&){}}
+                {"/api/user/tokens", http::verb::put, uri_params::type::NO},
+                {false, jwt_token_type::REFRESH_TOKEN, request_handlers::refresh_tokens}
+            },
+            {
+                {"/api/user/sessions", http::verb::get, uri_params::type::NO},
+                {false, jwt_token_type::REFRESH_TOKEN, request_handlers::get_sessions_info}
+            },
+            {
+                {"/api/user/sessions", http::verb::delete_, uri_params::type::PATH},
+                {false, jwt_token_type::ACCESS_TOKEN, request_handlers::close_session}
+            },
+            {
+                {"/api/user/sessions", http::verb::delete_, uri_params::type::NO},
+                {false, jwt_token_type::REFRESH_TOKEN, request_handlers::close_all_sessions_except_current}
+            },
+            {
+                {"/api/user/password", http::verb::put, uri_params::type::NO},
+                {true, jwt_token_type::REFRESH_TOKEN, request_handlers::change_password}
+            },
+            {
+                {"/api/file_system/files", http::verb::post, uri_params::type::QUERY},
+                {true, jwt_token_type::ACCESS_TOKEN, [](const request_params&, response_params&){}}
             }
         };
 }; 

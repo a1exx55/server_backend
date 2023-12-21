@@ -1,12 +1,12 @@
 #include <database/database_pool.hpp>
 
 void database_pool::init(
-    const size_t databases_number,
-    const std::string& username, 
-    const std::string& password, 
-    const std::string& host, 
-    const size_t port,
-    const std::string& database_name)
+    size_t databases_number,
+    std::string_view username, 
+    std::string_view password, 
+    std::string_view host, 
+    size_t port,
+    std::string_view database_name)
 {
     for (size_t i = 0; i < databases_number; ++i)
     {

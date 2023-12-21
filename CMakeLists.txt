@@ -15,12 +15,6 @@ find_package(Boost COMPONENTS REQUIRED
 
 find_package(OpenSSL REQUIRED)
 
-find_program(CCACHE_PROGRAM ccache)
-if(CCACHE_PROGRAM)
-    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
-    set(CMAKE_CUDA_COMPILER_LAUNCHER "${CCACHE_PROGRAM}") # CMake 3.9+
-endif()
-
 include_directories("include/" "src/")
  
 #include all source files
@@ -31,6 +25,7 @@ set(SRC
 	src/database/database_pool.cpp
 	src/network/listener.cpp
 	src/network/http_session.cpp
+	src/network/uri_params.cpp
 	src/request_handlers/request_handlers.cpp
 	src/jwt_utils/jwt_utils.cpp
 	src/cookie_utils/cookie_utils.cpp

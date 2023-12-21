@@ -1,7 +1,17 @@
 #include <network/http_session.hpp>
 
 http_session::http_session(tcp::socket&& socket, ssl::context& ssl_context)
-    :_stream(std::move(socket), ssl_context) 
+    :
+    _stream(std::move(socket), ssl_context), 
+    _request_params
+    {
+        .user_ip = beast::get_lowest_layer(_stream).socket().remote_endpoint().address().to_string(),
+        .body = _request_parser->get().body()
+    },
+    _response_params
+    {
+        .body = _response.body()
+    } 
 {
     _response.keep_alive(true);
     _response.version(11);
@@ -55,22 +65,34 @@ void http_session::on_handshake(beast::error_code error_code)
         return;
     }
 
+    set_request_props();
     do_read_header();
 }
 
-void http_session::do_read_header()
+void http_session::set_request_props()
 {
     // Make the request parser empty before reading new request,
     // otherwise the operation behavior is undefined
     _request_parser.emplace();
 
+    // Erase previous set cookie field values
+    _response.erase(http::field::set_cookie);
+    // Clear previous body data
+    _response.body().clear();
+
+    // Init response params with empty values(error status with unknown status code) to use it in request handler
+    _response_params.init_params();
+    
     // Set unlimited body to prevent "body limit exceeded" error
     // and handle the real limit in validate_request_attributes 
     _request_parser->body_limit(boost::none);
 
     // Fix the error "bad method" that happens if read only the header when there is a body in request
     _buffer.clear();
+}
 
+void http_session::do_read_header()
+{
     // Set the timeout for next operation
     beast::get_lowest_layer(_stream).expires_after(std::chrono::seconds(30));
     
@@ -110,17 +132,21 @@ void http_session::on_read_header(beast::error_code error_code, std::size_t byte
     // Determine the handler to invoke by request target 
     // or construct error response if didn't found corresponding target
     if (auto request_metadata = _requests_metadata.find(
-            {
-                get_unparameterized_uri(_request_parser->get().target()), 
-                _request_parser->get().method()
-            }); 
-            request_metadata != _requests_metadata.end())
+        {
+            uri_params::get_unparameterized_uri(_request_parser->get().target()), 
+            _request_parser->get().method(),
+            uri_params::determine_uri_parameters_type(_request_parser->get().target())
+        }); 
+        request_metadata != _requests_metadata.end())
     {
         // Check if the request attributes meets the requirements depending on the expected body presence
         if (!validate_request_attributes(std::get<0>(request_metadata->second)))
         {
             return do_write_response(false);
         }
+
+        // Parse request to get necessary http params in _request_params and use it in request handler
+        parse_request_params();
 
         // Validate jwt token(access or refresh) with the presence
         if (!validate_jwt_token(std::get<1>(request_metadata->second)))
@@ -133,7 +159,8 @@ void http_session::on_read_header(beast::error_code error_code, std::size_t byte
         {
             // Process downloading files separately because it is not synchronous as other handlers 
             if (request_metadata->first == 
-                std::pair<std::string_view, http::verb>{"/api/file_system/files", http::verb::post})
+                std::tuple<std::string_view, http::verb, uri_params::type>{
+                    "/api/file_system/files", http::verb::post, uri_params::type::QUERY})
             {
                 return download_files();
             }
@@ -141,7 +168,11 @@ void http_session::on_read_header(beast::error_code error_code, std::size_t byte
         }
         else
         {
-            std::get<2>(request_metadata->second)(*_request_parser, _response);
+            std::get<2>(request_metadata->second)(_request_params, _response_params);
+
+            // Parse reponse params to set all of the necessary fields in the _response
+            parse_response_params();
+
             do_write_response();
         }
     }
@@ -197,7 +228,12 @@ void http_session::on_read_body(
     // Reset the timeout as we may do long request handling 
     beast::get_lowest_layer(_stream).expires_never();
 
-    request_handler(*_request_parser, _response);
+    // Invoke the corresponding request handler to process the request logic
+    request_handler(_request_params, _response_params);
+
+    // Parse reponse params to set all of the necessary fields in the _response
+    parse_response_params();
+
     do_write_response();
 }
 
@@ -237,6 +273,7 @@ void http_session::on_write_response(bool keep_alive, beast::error_code error_co
     // depending on whether the response was regular or error
     if (keep_alive)
     {
+        set_request_props();    
         do_read_header();
     }
     else
@@ -254,380 +291,69 @@ void http_session::do_close()
     _stream.async_shutdown([self = shared_from_this()](beast::error_code){});
 }
 
-void http_session::prepare_error_response(const http::status response_status, const std::string_view& error_message)
+void http_session::prepare_error_response(const http::status response_status, std::string_view error_message)
 {
-    // Clear unnecessary field
-    _response.erase(http::field::set_cookie);
-    
     _response.result(response_status);
     _response.body().assign(R"({"error":")").append(error_message).append(R"("})");
     _response.prepare_payload();
 }
 
-std::string_view http_session::get_unparameterized_uri(const std::string_view& uri)
+void http_session::parse_request_params()
 {
-    // Start with position 5 because the uri has to start with /api/... and no need to capture these slashes
-    size_t delimiter_position = 5;
+    _request_params.uri = _request_parser->get().target();
+    _request_params.user_agent = _request_parser->get()[http::field::user_agent];
 
-    // Skip the next slash as it is the part of the uri
-    if ((delimiter_position = uri.find('/', 5)) == std::string::npos)
+    // Get access token from the Authorization field in the http header in the format of "Bearer <token>"
+    // so access token are less than the length 8 can't be at all(don't try to predict access token length) 
+    if (_request_parser->get()[http::field::authorization].size() >= 8) 
     {
-        return {};
+        _request_params.access_token = _request_parser->get()[http::field::authorization].substr(7);    
     }
 
-    // If we find the 4th slash in the uri then the path parameters start
-    if ((delimiter_position = uri.find('/', delimiter_position + 1)) != std::string::npos)
-    {
-        return uri.substr(0, delimiter_position);
-    }
+    // Get the refresh token from the Cookie field in the http header 
+    // by parsing cookies and getting the value of the key "refreshToken"
+    _request_params.refresh_token = cookie_utils::get_cookie_value(
+        _request_parser->get()[http::field::cookie], 
+        "refreshToken");
 
-    // If we find the question mark in the uri then the query parameters start
-    if ((delimiter_position = uri.find('?', 0)) != std::string::npos)
-    {
-        return uri.substr(0, delimiter_position);
-    }
-
-    // The uri was unparameterized from the start
-    return uri;
+    // Get the remember me option from the Cookie field in the http header 
+    // by parsing cookies and getting the value of the key "rememberMe" and converting string to bool
+    _request_params.remember_me = cookie_utils::get_cookie_value(
+        _request_parser->get()[http::field::cookie], 
+        "rememberMe") == "true" ? true : false;
 }
 
-template <typename param_value_t>
-bool http_session::get_path_parameter(
-    const std::string_view& uri, 
-    param_value_t& param_value_to_store)
+void http_session::parse_response_params()
 {
-    // Start with position 5 because the uri has to start with /api/... and no need to capture these slashes
-    size_t slash_position = 5;
-
-    // Skip the next slash as it is the part of the uri
-    slash_position = uri.find('/', 5);
-
-    // If we didn't find the 4th slash in the uri then there is no path parameter
-    if ((slash_position = uri.find('/', slash_position + 1)) == std::string::npos)
+    // If error status is unknown then request was successfully handled and the status has to be OK(200)  
+    if (_response_params.error_status == http::status::unknown)
     {
-        return false;
-    }
-
-    // If we found the next slash then there are too many slashes for our uri
-    if (uri.find('/', slash_position + 1) != std::string::npos)
-    {
-        return false;
-    }
-
-    // Path parameter is a string
-    if constexpr (std::is_same_v<param_value_t, std::string>)
-    {
-        param_value_to_store = uri.substr(slash_position + 1);
-    }
-    // Path parameter is a number
-    else if constexpr (std::is_integral_v<param_value_t>)
-    {
-        // Unsigned integers are got from string to uint64_t
-        if constexpr (std::is_unsigned_v<param_value_t>)
-        {
-            try
-            {
-                param_value_to_store = std::stoull(std::string{uri.substr(slash_position + 1)});
-            }
-            // Path parameter string value representation is not a number
-            catch (const std::exception&)
-            {
-                return false;
-            }
-        }
-        // Signed integers are got from string to int64_t
-        else if constexpr (std::is_signed_v<param_value_t>)
-        {
-            try
-            {
-                param_value_to_store = std::stoll(std::string{uri.substr(slash_position + 1)});
-            }
-            // Path parameter string value representation is not a number
-            catch (const std::exception&)
-            {
-                return false;
-            }
-        }
+        _response.result(http::status::ok);
     }
     else
     {
-        return false;
+        _response.result(_response_params.error_status);
     }
 
-    return true;
-}
-
-json::object http_session::get_query_parameters(const std::string_view& uri, size_t expected_params_number)
-{
-    // Start with position 5 because the uri has to start with /api/... and no need to capture these slashes
-    size_t delimiter_position = 5;
-
-    // Skip the next slash as it is the part of the uri
-    delimiter_position = uri.find('/', 5);
-
-    // If we found the 4th slash in the uri then there is path parameter instead of query ones
-    if (uri.find('/', delimiter_position + 1) != std::string::npos)
+    // If refresh token is not empty then set cookies with refreshToken and rememberMe fields respectively
+    if (_response_params.refresh_token != "")
     {
-        return {};
+        _response.insert(
+            http::field::set_cookie, 
+            cookie_utils::set_cookie(
+                "refreshToken", 
+                _response_params.refresh_token, 
+                _response_params.max_age));
+        _response.insert(
+            http::field::set_cookie,
+            cookie_utils::set_cookie(
+                "rememberMe", 
+                _response_params.remember_me ? "true" : "false", 
+                _response_params.max_age));
     }
 
-    // Query parameters must start with question mark
-    if ((delimiter_position = uri.find('?', delimiter_position + 1)) == std::string::npos)
-    {
-        return {};
-    }
-
-    size_t start_position = delimiter_position + 1, end_position;
-    json::object query_parameters;
-    
-    try
-    {
-        // Reserve the expected number of query parameters to avoid reallocating memory 
-        query_parameters.reserve(expected_params_number);
-
-        do
-        {
-            delimiter_position = uri.find('=', start_position);
-
-            // No equals sign so it is invalid format
-            if (delimiter_position == std::string::npos)
-            {
-                return {};
-            }
-
-            end_position = uri.find('&', delimiter_position + 1);
-
-            // If the key ends with [] then it is the array parameter
-            // otherwise it is just the regular string parameter
-            if (uri.substr(delimiter_position - 2, 2) == "[]")
-            {
-                // If there are array elements with the current key then just emplace the current value back
-                // otherwise emplace the array with the current value to the current key
-                if (query_parameters.contains(uri.substr(start_position, delimiter_position - start_position - 2)))
-                {
-                    query_parameters[uri.substr(start_position, delimiter_position - start_position - 2)]
-                        .as_array().emplace_back(uri.substr(
-                            delimiter_position + 1, 
-                            end_position - delimiter_position - 1));
-                }
-                else
-                {
-                    query_parameters.emplace(
-                        uri.substr(start_position, delimiter_position - start_position - 2), 
-                        json::array{uri.substr(delimiter_position + 1, end_position - delimiter_position - 1)});
-                }
-            }
-            else
-            {
-                query_parameters.emplace(
-                    uri.substr(start_position, delimiter_position - start_position),
-                    uri.substr(delimiter_position + 1, end_position - delimiter_position - 1));
-            }
-
-            start_position = end_position + 1;
-        } 
-        while (end_position != std::string::npos);
-    }
-    catch (const std::exception&)
-    {
-        return {};
-    }
-
-    return query_parameters;
-}
-
-template <typename param_value_t, typename... params_t>
-bool http_session::get_query_parameters(
-    const std::string_view& uri, 
-    const std::string_view& param_name, 
-    param_value_t& param_value_to_store, 
-    params_t&&... other_params) 
-{
-    size_t start_position{0}, equal_sign_position, end_position;
-
-    // Query parameter is a string
-    if constexpr (std::is_same_v<param_value_t, std::string>)
-    {
-        start_position = uri.find(param_name);
-
-        // No query parameter found
-        if (start_position == std::string::npos)
-        {
-            return false;
-        }
-
-        equal_sign_position = start_position + param_name.size();
-
-        // No equal sign so it is invalid format
-        if (equal_sign_position >= uri.size() || uri[equal_sign_position] != '=')
-        {
-            return false;
-        }
-
-        end_position = uri.find('&', equal_sign_position + 1);
-
-        param_value_to_store = uri.substr(equal_sign_position + 1, end_position - equal_sign_position - 1);
-    }
-    // Query parameter is a number
-    else if constexpr (std::is_integral_v<param_value_t>)
-    {
-        start_position = uri.find(param_name);
-
-        // No query parameter found
-        if (start_position == std::string::npos)
-        {
-            return false;
-        }
-
-        equal_sign_position = start_position + param_name.size();
-
-        // No equal sign so it is invalid format
-        if (equal_sign_position >= uri.size() || uri[equal_sign_position] != '=')
-        {
-            return false;
-        }
-
-        end_position = uri.find('&', equal_sign_position + 1);
-
-        // Unsigned integers are got from string to uint64_t
-        if constexpr (std::is_unsigned_v<param_value_t>)
-        {
-            try
-            {
-                param_value_to_store = std::stoull(
-                        std::string{uri.substr(equal_sign_position + 1, end_position - equal_sign_position - 1)},
-                        &start_position);
-
-                // Query parameter string value representation contains non digits after valid number
-                if (start_position != 
-                    uri.substr(equal_sign_position + 1, end_position - equal_sign_position - 1).size())
-                {
-                    return false;
-                }
-            }
-            // Query parameter string value representation is not a number
-            catch (const std::exception&)
-            {
-                return false;
-            }
-        }
-        // Signed integers are got from string to int64_t
-        else if constexpr (std::is_signed_v<param_value_t>)
-        {
-            try
-            {
-                param_value_to_store = std::stoll(
-                    std::string{uri.substr(equal_sign_position + 1, end_position - equal_sign_position - 1)});
-
-                // Query parameter string value representation contains non digits after valid number
-                if (start_position != 
-                    uri.substr(equal_sign_position + 1, end_position - equal_sign_position - 1).size())
-                {
-                    return false;
-                }
-            }
-            // Query parameter string value representation is not a number
-            catch (const std::exception&)
-            {
-                return false;
-            }
-        }
-    }
-    // Query parameter is an array(process only std::vector<>)
-    else if constexpr (std::is_same_v<
-        param_value_t, std::vector<typename param_value_t::value_type, typename param_value_t::allocator_type>>)
-    {
-        param_value_to_store.clear();
-
-        do
-        {
-            start_position = uri.find(param_name, start_position);
-
-            // No query parameter found
-            if (start_position == std::string::npos)
-            {
-                // There have to be some array query parameters with given name
-                if (param_value_to_store.empty())
-                {
-                    return false;
-                }
-                else
-                {
-                    break;
-                }
-            }
-
-            equal_sign_position = start_position + param_name.size() + 2;
-
-            // No equal sign so it is invalid format
-            if (equal_sign_position >= uri.size() || uri[equal_sign_position] != '=')
-            {
-                return false;
-            }
-
-            // Array parameter name has to be followed by []
-            if (uri.substr(equal_sign_position - 2, 2) != "[]")
-            {
-                return false;
-            }
-
-            end_position = start_position = uri.find('&', equal_sign_position + 1);
-
-            // Array elements type is a string
-            if constexpr (std::is_same_v<typename param_value_t::value_type, std::string>)
-            {
-                param_value_to_store.emplace_back(
-                    uri.substr(equal_sign_position + 1, end_position - equal_sign_position - 1));
-            }
-            //Array elements type is a number
-            else if constexpr (std::is_integral_v<typename param_value_t::value_type>)
-            {
-                // Unsigned integers are got from string to uint64_t
-                if constexpr (std::is_unsigned_v<typename param_value_t::value_type>)
-                {
-                    try
-                    {
-                        param_value_to_store.emplace_back(std::stoull(std::string{uri.substr(
-                            equal_sign_position + 1, end_position - equal_sign_position - 1)}));
-                    }
-                    // Query parameter string value representation is not a number
-                    catch (const std::exception&)
-                    {
-                        return false;
-                    }
-                }
-                // Signed integers are got from string to int64_t
-                else if constexpr (std::is_signed_v<typename param_value_t::value_type>)
-                {
-                    try
-                    {
-                        param_value_to_store.emplace_back(std::stoll(std::string{uri.substr(
-                            equal_sign_position + 1, end_position - equal_sign_position - 1)}));
-                    }
-                    // Query parameter string value representation is not a number
-                    catch (const std::exception&)
-                    {
-                        return false;
-                    }
-                }
-            }
-        } while (end_position != std::string::npos);  
-    }
-    else
-    {
-        return false;
-    }
-
-    // Call the same function if there are query parameters left to process
-    if constexpr (sizeof...(other_params) > 0) 
-    {
-        if (!get_query_parameters(uri, std::forward<params_t>(other_params)...))
-        {
-            return false;
-        }
-    }
-
-    return true;
+    // Prepare payload by setting the Content-Length and Transfer-Encoding fields
+    _response.prepare_payload();
 }
 
 bool http_session::validate_request_attributes(bool has_body)
@@ -709,10 +435,7 @@ bool http_session::validate_jwt_token(jwt_token_type token_type)
 
         case (jwt_token_type::ACCESS_TOKEN):
         {
-            // Get access token from the Authorization field in the http header in the format of "Bearer <token>"
-            // so the strings are less than the length 8 can't be at all(don't try to predict access token length) 
-            if (_request_parser->get()[http::field::authorization].size() < 8 || 
-                !jwt_utils::is_token_valid(_request_parser->get()[http::field::authorization].substr(7)))
+            if (!jwt_utils::is_token_valid(std::string{_request_params.access_token}))
             {
                 prepare_error_response(http::status::unauthorized, "Invalid access token");
                 return false;
@@ -723,12 +446,7 @@ bool http_session::validate_jwt_token(jwt_token_type token_type)
 
         case (jwt_token_type::REFRESH_TOKEN):
         {
-            // Get the refresh token from the Cookie field in the http header 
-            // by parsing cookies and getting the value of the key "refreshToken"
-            if (!jwt_utils::is_token_valid(
-                std::string{cookie_utils::get_cookie_value(
-                    _request_parser->get()[http::field::cookie], 
-                    "refreshToken")}))
+            if (!jwt_utils::is_token_valid(std::string{_request_params.refresh_token}))
             {
                 prepare_error_response(http::status::unauthorized, "Invalid refresh token");
                 return false;
@@ -748,15 +466,15 @@ void http_session::download_files()
 {
     size_t folder_id;
 
-    if (!get_query_parameters(_request_parser->get().target(), "folderId", folder_id))
+    if (!uri_params::get_query_parameters(_request_parser->get().target(), "folderId", folder_id))
     {
         prepare_error_response(
             http::status::unprocessable_entity, 
-            "Invalid folder id as query parameter");
+            "Invalid folder id");
         return do_write_response(false);
     }
 
-    auto db = database_pool::get();
+    std::unique_ptr<database> db = database_pool::get();
 
     // No available connections
     if (!db)
@@ -767,10 +485,10 @@ void http_session::download_files()
         return do_write_response(false);
     }
 
-    auto folder_path = db->get_folder_path(folder_id);
+    std::optional<std::string> folder_path_opt = db->get_folder_path(folder_id);
     
     // An error occured with database connection
-    if (!folder_path)
+    if (!folder_path_opt.has_value())
     {
         database_pool::release(std::move(db));
 
@@ -781,13 +499,13 @@ void http_session::download_files()
     }
 
     // Folder with folder_id doesn't exist
-    if (*folder_path == "")
+    if (folder_path_opt.value() == "")
     {
         database_pool::release(std::move(db));
 
         prepare_error_response(
             http::status::unprocessable_entity, 
-            "Invalid folder id as query parameter");
+            "Invalid folder id");
         return do_write_response(false);
     }
     
@@ -869,7 +587,7 @@ void http_session::download_files()
             std::move(buffer), 
             std::move(boundary), 
             folder_id, 
-            std::move(*folder_path), 
+            std::move(folder_path_opt.value()), 
             std::move(file),
             std::move(db),
             std::move(file_ids_and_paths)));
@@ -932,7 +650,7 @@ void http_session::handle_file_header(
 
     // This error means that access token was somehow generated incorrectly
     if (!jwt_utils::get_token_claim(
-        std::string{_request_parser->get()[http::field::authorization].substr(7)}, 
+        std::string{_request_params.access_token}, 
         "userId", 
         user_id))
     {
@@ -998,7 +716,7 @@ void http_session::handle_file_header(
     file_name.clear();
     file_name_unicode.toUTF8String(file_name);
 
-    std::optional<bool> does_file_exist;
+    std::optional<bool> does_file_exist_opt;
     size_t opening_bracket, copy_number, non_digit_pos;
 
     // Check if the file with specified name exists in database
@@ -1006,9 +724,9 @@ void http_session::handle_file_header(
     // until the modified name is available in database
     while (true)    
     {
-        does_file_exist = db->check_file_existence_by_name(folder_id, file_name);
+        does_file_exist_opt = db->check_file_existence_by_name(folder_id, file_name);
 
-        if (!does_file_exist)
+        if (!does_file_exist_opt.has_value())
         {
             database_pool::release(std::move(db));
 
@@ -1025,7 +743,7 @@ void http_session::handle_file_header(
         }
 
         // We found the available file name so stop creating copies
-        if (!*does_file_exist)
+        if (!does_file_exist_opt.value())
         {
             break;
         }
@@ -1066,7 +784,7 @@ void http_session::handle_file_header(
         }       
     }
 
-    std::optional<std::pair<size_t, std::string>> file_id_and_path = db->insert_file(
+    std::optional<std::pair<size_t, std::string>> file_id_and_path_opt = db->insert_file(
         user_id,
         folder_id,
         folder_path,
@@ -1074,7 +792,7 @@ void http_session::handle_file_header(
         file_extension);
 
     // An error occured with database connection
-    if (!file_id_and_path)
+    if (!file_id_and_path_opt.has_value())
     {
         database_pool::release(std::move(db));
 
@@ -1091,10 +809,10 @@ void http_session::handle_file_header(
     }
 
     // Create and open the file to write the obtaining data
-    file.open(file_id_and_path->second, std::ios::binary);
+    file.open(file_id_and_path_opt->second, std::ios::binary);
 
     // Store id and path of the current file to process it after the download(e.g. to recode or unzip for archives)
-    file_ids_and_paths.emplace_back(*file_id_and_path);
+    file_ids_and_paths.emplace_back(file_id_and_path_opt.value());
 
     // Consume the file header bytes 
     buffer.consume(bytes_transferred);
@@ -1231,7 +949,7 @@ void http_session::handle_file_data(
     }
 
     // Update the data about just downloaded file
-    if (!db->update_uploaded_file(file_ids_and_paths.back().first, file_size))
+    if (!db->update_uploaded_file(file_ids_and_paths.back().first, file_size).has_value())
     {
         process_file_cleanup();
    
@@ -1251,9 +969,7 @@ void http_session::handle_file_data(
 
         std::thread{request_handlers::process_downloaded_files, std::move(file_ids_and_paths)}.detach();
 
-        _response.erase(http::field::set_cookie);
         _response.result(http::status::ok);
-        _response.body().clear(); 
         _response.prepare_payload();
 
         return do_write_response(true);

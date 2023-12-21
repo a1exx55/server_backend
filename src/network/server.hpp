@@ -52,7 +52,15 @@ namespace server
 
         // This holds the self-signed certificate used by the server
 
-        load_server_certificate(ssl_context);
+        try
+        {
+            load_server_certificate(ssl_context);        
+        }
+        catch(const std::exception& ex)
+        {
+            LOG_ERROR << ex.what();
+            return;
+        }
 
         //???maybe will be necessary to perform real tcp
         //ssl_context.set_verify_mode(ssl::verify_peer);

@@ -1,9 +1,9 @@
 #include <cookie_utils/cookie_utils.hpp>
 
 std::string cookie_utils::set_cookie(
-        const std::string_view& key, 
-        const std::string_view& value, 
-        const std::chrono::seconds max_age)
+        std::string_view key, 
+        std::string_view value, 
+        std::chrono::seconds max_age)
 {
     std::string cookie;
 
@@ -21,7 +21,7 @@ std::string cookie_utils::set_cookie(
     return cookie;
 }
 
-json::object cookie_utils::parse_cookies(const std::string_view& cookies)
+json::object cookie_utils::parse_cookies(std::string_view cookies)
 {
     json::object cookies_json;
 
@@ -61,7 +61,7 @@ json::object cookie_utils::parse_cookies(const std::string_view& cookies)
     return cookies_json;
 }
 
-std::string_view cookie_utils::get_cookie_value(const std::string_view& cookies, const std::string_view& cookie_key)
+std::string_view cookie_utils::get_cookie_value(std::string_view cookies, std::string_view cookie_key)
 {
     // Find the start position of cookie_key
     size_t cookie_key_position = cookies.find(cookie_key);
