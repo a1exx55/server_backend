@@ -1,6 +1,6 @@
-#include <database/database.hpp>
+#include <database/database_connection.hpp>
 
-database::database(
+database_connection::database_connection(
             std::string_view username, 
             std::string_view password, 
             std::string_view host, 
@@ -18,7 +18,7 @@ database::database(
                 .append(database_name)}
 {}
 
-bool database::reconnect()
+bool database_connection::reconnect()
 {
     try
     {
@@ -32,7 +32,7 @@ bool database::reconnect()
     return true;
 }
 
-bool database::close_all_sessions_except_current_impl(
+bool database_connection::close_all_sessions_except_current_impl(
     pqxx::work& transaction, 
     size_t user_id, 
     std::string_view refresh_token)
@@ -61,7 +61,7 @@ bool database::close_all_sessions_except_current_impl(
     }
 }
 
-std::optional<size_t> database::login(std::string_view username, std::string_view password)
+std::optional<size_t> database_connection::login(std::string_view username, std::string_view password)
 {
     pqxx::work transaction{*_conn};
     
@@ -98,7 +98,7 @@ std::optional<size_t> database::login(std::string_view username, std::string_vie
     } 
 }
 
-std::optional<std::monostate> database::insert_session(
+std::optional<std::monostate> database_connection::insert_session(
     size_t user_id, 
     std::string_view refresh_token, 
     std::string_view user_agent,
@@ -181,7 +181,7 @@ std::optional<std::monostate> database::insert_session(
     } 
 }
 
-std::optional<bool> database::close_current_session(std::string_view refresh_token, std::string_view user_ip)
+std::optional<bool> database_connection::close_current_session(std::string_view refresh_token, std::string_view user_ip)
 {
     pqxx::work transaction{*_conn};
     
@@ -230,7 +230,7 @@ std::optional<bool> database::close_current_session(std::string_view refresh_tok
     } 
 }
 
-std::optional<bool> database::update_refresh_token(
+std::optional<bool> database_connection::update_refresh_token(
     std::string_view old_refresh_token, 
     std::string_view new_refresh_token, 
     std::string_view user_ip)
@@ -280,7 +280,7 @@ std::optional<bool> database::update_refresh_token(
     } 
 }
 
-std::optional<json::object> database::get_sessions_info(size_t user_id, std::string_view refresh_token)
+std::optional<json::object> database_connection::get_sessions_info(size_t user_id, std::string_view refresh_token)
 {
     pqxx::work transaction{*_conn};
     json::object sessions_json;
@@ -317,7 +317,7 @@ std::optional<json::object> database::get_sessions_info(size_t user_id, std::str
         for (auto [id, login_date, last_seen_date, user_agent, ip] : 
             transaction.query<size_t, std::string, std::string, std::string, std::string>(
                 "SELECT id,login_date,last_seen_date,user_agent,ip FROM sessions WHERE user_id=" + 
-                pqxx::to_string(user_id) + " AND status='inactive' AND refresh_token_id<>" + 
+                pqxx::to_string(user_id) + " AND status<>'inactive' AND refresh_token_id<>" + 
                 pqxx::to_string(refresh_token_id) + " ORDER BY last_seen_date DESC"))
         {
             other_active_sessions_array.emplace_back(
@@ -380,7 +380,7 @@ std::optional<json::object> database::get_sessions_info(size_t user_id, std::str
     } 
 }
 
-std::optional<bool> database::close_own_session(size_t session_id, size_t user_id)
+std::optional<bool> database_connection::close_own_session(size_t session_id, size_t user_id)
 {
     pqxx::work transaction{*_conn};
     
@@ -430,7 +430,7 @@ std::optional<bool> database::close_own_session(size_t session_id, size_t user_i
     } 
 }
 
-std::optional<bool> database::close_all_sessions_except_current(size_t user_id, std::string_view refresh_token)
+std::optional<bool> database_connection::close_all_sessions_except_current(size_t user_id, std::string_view refresh_token)
 {
     pqxx::work transaction{*_conn};
   
@@ -460,7 +460,7 @@ std::optional<bool> database::close_all_sessions_except_current(size_t user_id, 
     } 
 }
 
-std::optional<bool> database::validate_password(size_t user_id, std::string_view password)
+std::optional<bool> database_connection::validate_password(size_t user_id, std::string_view password)
 {
     pqxx::work transaction{*_conn};
     
@@ -492,7 +492,7 @@ std::optional<bool> database::validate_password(size_t user_id, std::string_view
     } 
 }
 
-std::optional<bool> database::change_password(
+std::optional<bool> database_connection::change_password(
     size_t user_id, 
     std::string_view new_password, 
     std::string_view refresh_token)
@@ -529,7 +529,7 @@ std::optional<bool> database::change_password(
     } 
 }
 
-std::optional<std::string> database::get_folder_path(size_t folder_id)
+std::optional<std::string> database_connection::get_folder_path(size_t folder_id)
 {
     pqxx::work transaction{*_conn};
     
@@ -565,7 +565,7 @@ std::optional<std::string> database::get_folder_path(size_t folder_id)
     } 
 }
 
-std::optional<bool> database::check_file_existence_by_name(size_t folder_id, std::string_view file_name)
+std::optional<bool> database_connection::check_file_existence_by_name(size_t folder_id, std::string_view file_name)
 {
     pqxx::work transaction{*_conn};
     
@@ -596,7 +596,7 @@ std::optional<bool> database::check_file_existence_by_name(size_t folder_id, std
     }
 }
 
-std::optional<std::pair<size_t, std::string>> database::insert_file(
+std::optional<std::pair<size_t, std::string>> database_connection::insert_file(
     size_t user_id, 
     size_t folder_id,
     std::string_view folder_path,
@@ -641,7 +641,7 @@ std::optional<std::pair<size_t, std::string>> database::insert_file(
     }
 }
 
-std::optional<std::monostate> database::delete_file(size_t file_id)
+std::optional<std::monostate> database_connection::delete_file(size_t file_id)
 {
     pqxx::work transaction{*_conn};
     
@@ -675,7 +675,7 @@ std::optional<std::monostate> database::delete_file(size_t file_id)
     }
 }
 
-std::optional<std::monostate> database::update_uploaded_file(size_t file_id, size_t file_size)
+std::optional<std::monostate> database_connection::update_uploaded_file(size_t file_id, size_t file_size)
 {
     pqxx::work transaction{*_conn};
     

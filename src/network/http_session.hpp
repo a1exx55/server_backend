@@ -92,7 +92,7 @@ class http_session : public std::enable_shared_from_this<http_session>
             size_t folder_id,
             std::string&& folder_path, 
             std::ofstream&& file,
-            std::unique_ptr<database>&& db, 
+            database_connection_wrapper&& db, 
             std::list<std::pair<size_t, std::string>>&& file_paths,
             beast::error_code error_code, std::size_t bytes_transferred);
 
@@ -102,7 +102,7 @@ class http_session : public std::enable_shared_from_this<http_session>
             size_t folder_id,
             std::string&& folder_path, 
             std::ofstream&& file,
-            std::unique_ptr<database>&& db, 
+            database_connection_wrapper&& db, 
             std::list<std::pair<size_t, std::string>>&& file_paths,
             beast::error_code error_code, std::size_t bytes_transferred);
 

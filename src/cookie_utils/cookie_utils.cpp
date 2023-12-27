@@ -7,26 +7,22 @@ std::string cookie_utils::set_cookie(
 {
     std::string cookie;
 
-    // Reserve estimate number of characters to avoid extra allocations
-    cookie.reserve(key.size() + value.size() + 40);
-
     cookie
         .append(key)
         .append("=")
-        .append(value)
-        .append("; Max-Age=")
-        .append(std::to_string(max_age.count()))
-        .append("; HttpOnly; Secure");
-    
+        .append(value);
+
+    if (max_age != std::chrono::seconds{-1})
+        cookie.append("; Max-Age=" + std::to_string(max_age.count()));
+
+    cookie.append("; Path=/; HttpOnly; Secure");
+
     return cookie;
 }
 
 json::object cookie_utils::parse_cookies(std::string_view cookies)
 {
     json::object cookies_json;
-
-    // Reserve predicted number of elements in cookies json(in this project(for performance))
-    cookies_json.reserve(2);
 
     // Use three positions of cookie expression to get the key and value of each cookie:
     // start_position(1) - the start of cookie expression

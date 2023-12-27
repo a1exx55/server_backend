@@ -1,29 +1,83 @@
 #ifndef CONFIG_HPP
 #define CONFIG_HPP
 
+//local
+#include <logging/logger.hpp>
+
 //internal
 #include <string>
 #include <stdint.h>
 #include <chrono>
+#include <fstream>
+#include <filesystem>
+
+//external
+#include <boost/json.hpp>
+
+namespace json = boost::json;
 
 namespace config
 {
-    inline constexpr std::string SERVER_IP_ADDRESS{"127.0.0.1"};
-    inline constexpr uint_least16_t SERVER_PORT{12345};
-    inline constexpr int THREADS_NUMBER{20};
-    inline constexpr size_t DATABASES_NUMBER{20};
-    inline constexpr size_t DATABASE_PORT{5432};
-    inline constexpr std::string DATABASE_NAME{"drain"};
-    inline constexpr std::string DATABASE_USERNAME{"root"};
-    inline constexpr std::string DATABASE_PASSWORD{"oral"};
-    inline const std::string FOLDERS_PATH{"/home/dmitry/drains/"};
-    inline const std::string LOG_FILE_PATH{"/home/dmitry/vscodeprojects/dataleak_parser/server_backend.log"};
-    inline const std::string SSL_CERT_PATH{"/etc/ssl/ocsearch.crt"};
-    inline const std::string SSL_KEY_PATH{"/etc/ssl/ocsearch.key"};
-    inline constexpr bool CONSOLE_LOG_ENABLED{true};
-    inline constexpr std::string JWT_SECRET_KEY{"secret_key"};
-    inline constexpr std::chrono::minutes ACCESS_TOKEN_EXPIRY_TIME{15};
-    inline constexpr std::chrono::days REFRESH_TOKEN_EXPIRY_TIME{30};
+    // Path to the json config
+    inline const std::string CONFIG_PATH{"../config.json"};
+
+    inline std::string SERVER_IP_ADDRESS;
+    inline uint_least16_t SERVER_PORT;
+    inline std::string DOMAIN_NAME;
+    inline int THREADS_NUMBER;
+    inline size_t DATABASES_NUMBER;
+    inline size_t DATABASE_PORT;
+    inline std::string DATABASE_NAME;
+    inline std::string DATABASE_USERNAME;
+    inline std::string DATABASE_PASSWORD;
+    inline std::string FOLDERS_PATH;
+    inline std::string LOG_FILE_PATH;
+    inline std::string SSL_CERT_PATH;
+    inline std::string SSL_KEY_PATH;
+    inline bool CONSOLE_LOG_ENABLED;
+    inline std::string JWT_SECRET_KEY;
+    inline std::chrono::minutes ACCESS_TOKEN_EXPIRY_TIME;
+    inline std::chrono::days REFRESH_TOKEN_EXPIRY_TIME;
+
+    inline void init()
+    {
+        std::ifstream config_file{CONFIG_PATH};
+
+        if (!config_file.is_open())
+        {
+            throw std::invalid_argument{
+                "Config file was not found at the specified path: " + 
+                std::filesystem::canonical(config::CONFIG_PATH).string()};
+        }
+        
+        std::string config_data;
+        size_t config_file_size = std::filesystem::file_size(CONFIG_PATH);
+        config_data.resize(config_file_size);
+
+        config_file.read(config_data.data(), config_file_size);
+        json::object config_json = json::parse(config_data).as_object();
+        
+        // Initialize config variables with values from json
+        SERVER_IP_ADDRESS = config_json.at("SERVER_IP_ADDRESS").as_string();
+        SERVER_PORT = config_json.at("SERVER_PORT").to_number<uint_least16_t>();
+        DOMAIN_NAME = config_json.at("DOMAIN_NAME").as_string();
+        THREADS_NUMBER = config_json.at("THREADS_NUMBER").to_number<int>();
+        DATABASES_NUMBER = config_json.at("DATABASES_NUMBER").to_number<size_t>();
+        DATABASE_PORT = config_json.at("DATABASE_PORT").to_number<size_t>();
+        DATABASE_NAME = config_json.at("DATABASE_NAME").as_string();
+        DATABASE_USERNAME = config_json.at("DATABASE_USERNAME").as_string();
+        DATABASE_PASSWORD = config_json.at("DATABASE_PASSWORD").as_string();
+        FOLDERS_PATH = config_json.at("FOLDERS_PATH").as_string();
+        LOG_FILE_PATH = config_json.at("LOG_FILE_PATH").as_string();
+        SSL_CERT_PATH = config_json.at("SSL_CERT_PATH").as_string();
+        SSL_KEY_PATH = config_json.at("SSL_KEY_PATH").as_string();
+        CONSOLE_LOG_ENABLED = config_json.at("CONSOLE_LOG_ENABLED").as_bool();
+        JWT_SECRET_KEY = config_json.at("JWT_SECRET_KEY").as_string();
+        ACCESS_TOKEN_EXPIRY_TIME = std::chrono::minutes{
+            config_json.at("ACCESS_TOKEN_EXPIRY_TIME").to_number<size_t>()};
+        REFRESH_TOKEN_EXPIRY_TIME = std::chrono::days{
+            config_json.at("REFRESH_TOKEN_EXPIRY_TIME").to_number<size_t>()};
+    }
 }
 
 #endif

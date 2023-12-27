@@ -19,6 +19,10 @@ http_session::http_session(tcp::socket&& socket, ssl::context& ssl_context)
     _response.set(
         http::field::host, 
         config::SERVER_IP_ADDRESS + ":" + std::to_string(config::SERVER_PORT));
+    _response.set(http::field::access_control_allow_credentials, "true");
+    _response.set(http::field::access_control_allow_origin, config::DOMAIN_NAME);
+    _response.set(http::field::access_control_allow_methods, "OPTIONS, GET, POST, PUT, PATCH, DELETE");
+    _response.set(http::field::access_control_allow_headers, "Content-Type, Authorization");
 }
 
 void http_session::run()
@@ -128,6 +132,14 @@ void http_session::on_read_header(beast::error_code error_code, std::size_t byte
 
     // Reset the timeout
     beast::get_lowest_layer(_stream).expires_never();
+
+    // Process OPTIONS method separately: 
+    if (_request_parser->get().method() == http::verb::options)
+    {
+        parse_response_params();
+
+        return do_write_response(true);
+    }
 
     // Determine the handler to invoke by request target 
     // or construct error response if didn't found corresponding target
@@ -403,22 +415,22 @@ bool http_session::validate_request_attributes(bool has_body)
         }
 
         // Content-Length absence causes difficult debugging of the body errors 
-        if (!_request_parser->content_length())
-        {
-            prepare_error_response(
-                http::status::length_required, 
-                "No Content-Length field");
-            return false;
-        }
+        // if (!_request_parser->content_length())
+        // {
+        //     prepare_error_response(
+        //         http::status::length_required, 
+        //         "No Content-Length field");
+        //     return false;
+        // }
 
-        // Request without body is expected Content-Length to be zero
-        if (*_request_parser->content_length() != 0)
-        {
-            prepare_error_response(
-                http::status::length_required, 
-                "Content-Length field was expected to be zero");
-            return false;
-        }
+        // // Request without body is expected Content-Length to be zero
+        // if (*_request_parser->content_length() != 0)
+        // {
+        //     prepare_error_response(
+        //         http::status::length_required, 
+        //         "Content-Length field was expected to be zero");
+        //     return false;
+        // }
 
         return true;
     }
@@ -474,10 +486,10 @@ void http_session::download_files()
         return do_write_response(false);
     }
 
-    std::unique_ptr<database> db = database_pool::get();
+    database_connection_wrapper db_conn = database_connections_pool::get();
 
     // No available connections
-    if (!db)
+    if (!db_conn)
     {
         prepare_error_response(
             http::status::internal_server_error, 
@@ -485,13 +497,11 @@ void http_session::download_files()
         return do_write_response(false);
     }
 
-    std::optional<std::string> folder_path_opt = db->get_folder_path(folder_id);
+    std::optional<std::string> folder_path_opt = db_conn->get_folder_path(folder_id);
     
     // An error occured with database connection
     if (!folder_path_opt.has_value())
     {
-        database_pool::release(std::move(db));
-
         prepare_error_response(
             http::status::internal_server_error, 
             "Internal server error occured");
@@ -501,8 +511,6 @@ void http_session::download_files()
     // Folder with folder_id doesn't exist
     if (folder_path_opt.value() == "")
     {
-        database_pool::release(std::move(db));
-
         prepare_error_response(
             http::status::unprocessable_entity, 
             "Invalid folder id");
@@ -524,8 +532,6 @@ void http_session::download_files()
     // Boundary was not found in the content type
     if (boundary_position == std::string::npos)
     {
-        database_pool::release(std::move(db));
-
         prepare_error_response(
             http::status::unprocessable_entity, 
             "Invalid Content-Type");
@@ -553,14 +559,12 @@ void http_session::download_files()
                 size_t folder_id,
                 std::string&& folder_path, 
                 std::ofstream&& file, 
-                std::unique_ptr<database>&& db,
+                database_connection_wrapper&& db_conn,
                 std::list<std::pair<size_t, std::string>>&& file_ids_and_paths,
                 beast::error_code error_code, std::size_t bytes_transferred)
             {
                 if (error_code)
                 {
-                    database_pool::release(std::move(db));
-
                     return do_close();
                 }
 
@@ -581,7 +585,7 @@ void http_session::download_files()
                         folder_id, 
                         std::move(folder_path), 
                         std::move(file),
-                        std::move(db),
+                        std::move(db_conn),
                         std::move(file_ids_and_paths)));
             }, 
             std::move(buffer), 
@@ -589,7 +593,7 @@ void http_session::download_files()
             folder_id, 
             std::move(folder_path_opt.value()), 
             std::move(file),
-            std::move(db),
+            std::move(db_conn),
             std::move(file_ids_and_paths)));
     
 }
@@ -600,14 +604,12 @@ void http_session::handle_file_header(
     size_t folder_id,
     std::string&& folder_path, 
     std::ofstream&& file,
-    std::unique_ptr<database>&& db, 
+    database_connection_wrapper&& db_conn, 
     std::list<std::pair<size_t, std::string>>&& file_ids_and_paths,
     beast::error_code error_code, std::size_t bytes_transferred)
 {
     if (error_code)
     {
-        database_pool::release(std::move(db));
-
         // If there are downloaded files then start separately processing them and close the connection
         if (!file_ids_and_paths.empty())
         {
@@ -629,8 +631,6 @@ void http_session::handle_file_header(
     // filename field is absent
     if (file_name_position == std::string::npos)
     {
-        database_pool::release(std::move(db));
-
         // If there are downloaded files then start separately processing them and return response
         if (!file_ids_and_paths.empty())
         {
@@ -654,8 +654,6 @@ void http_session::handle_file_header(
         "userId", 
         user_id))
     {
-        database_pool::release(std::move(db));
-
         // If there are downloaded files then start separately processing them and return response
         if (!file_ids_and_paths.empty())
         {
@@ -682,8 +680,6 @@ void http_session::handle_file_header(
     // Invalid file extension
     if (!allowed_file_extensions.contains(file_extension))
     {
-        database_pool::release(std::move(db));
-
         // If there are downloaded files then start separately processing them and return response
         if (!file_ids_and_paths.empty())
         {
@@ -724,12 +720,10 @@ void http_session::handle_file_header(
     // until the modified name is available in database
     while (true)    
     {
-        does_file_exist_opt = db->check_file_existence_by_name(folder_id, file_name);
+        does_file_exist_opt = db_conn->check_file_existence_by_name(folder_id, file_name);
 
         if (!does_file_exist_opt.has_value())
         {
-            database_pool::release(std::move(db));
-
             // If there are downloaded files then start separately processing them and return response
             if (!file_ids_and_paths.empty())
             {
@@ -784,7 +778,7 @@ void http_session::handle_file_header(
         }       
     }
 
-    std::optional<std::pair<size_t, std::string>> file_id_and_path_opt = db->insert_file(
+    std::optional<std::pair<size_t, std::string>> file_id_and_path_opt = db_conn->insert_file(
         user_id,
         folder_id,
         folder_path,
@@ -794,8 +788,6 @@ void http_session::handle_file_header(
     // An error occured with database connection
     if (!file_id_and_path_opt.has_value())
     {
-        database_pool::release(std::move(db));
-
         // If there are downloaded files then start separately processing them and return response
         if (!file_ids_and_paths.empty())
         {
@@ -830,7 +822,7 @@ void http_session::handle_file_header(
             folder_id, 
             std::move(folder_path), 
             std::move(file),
-            std::move(db),
+            std::move(db_conn),
             std::move(file_ids_and_paths)));
 }
 
@@ -840,7 +832,7 @@ void http_session::handle_file_data(
     size_t folder_id,
     std::string&& folder_path, 
     std::ofstream&& file,
-    std::unique_ptr<database>&& db, 
+    database_connection_wrapper&& db_conn, 
     std::list<std::pair<size_t, std::string>>&& file_ids_and_paths,
     beast::error_code error_code, std::size_t bytes_transferred)
 {
@@ -869,7 +861,7 @@ void http_session::handle_file_data(
                 folder_id, 
                 std::move(folder_path), 
                 std::move(file),
-                std::move(db),
+                std::move(db_conn),
                 std::move(file_ids_and_paths)));
         return;
     }
@@ -889,7 +881,7 @@ void http_session::handle_file_data(
         }
 
         // Delete the file from the database
-        db->delete_file(file_ids_and_paths.back().first);
+        db_conn->delete_file(file_ids_and_paths.back().first);
 
         // Remove the file from the list of downloaded files 
         file_ids_and_paths.pop_back();
@@ -907,8 +899,6 @@ void http_session::handle_file_data(
         file.close();
 
         process_file_cleanup();
-
-        database_pool::release(std::move(db));
 
         return do_close();
     }
@@ -940,8 +930,6 @@ void http_session::handle_file_data(
 
         process_file_cleanup();
    
-        database_pool::release(std::move(db));
-
         prepare_error_response(
             http::status::internal_server_error, 
             "Internal server error occured");
@@ -949,12 +937,10 @@ void http_session::handle_file_data(
     }
 
     // Update the data about just downloaded file
-    if (!db->update_uploaded_file(file_ids_and_paths.back().first, file_size).has_value())
+    if (!db_conn->update_uploaded_file(file_ids_and_paths.back().first, file_size).has_value())
     {
         process_file_cleanup();
    
-        database_pool::release(std::move(db));
-
         prepare_error_response(
             http::status::internal_server_error, 
             "Internal server error occured");
@@ -965,8 +951,6 @@ void http_session::handle_file_data(
     // So start processing downloaded files and send response
     if (std::string_view{asio::buffer_cast<const char*>(buffer.data()), buffer.size()} == "--\r\n")
     {
-        database_pool::release(std::move(db));
-
         std::thread{request_handlers::process_downloaded_files, std::move(file_ids_and_paths)}.detach();
 
         _response.result(http::status::ok);
@@ -988,6 +972,6 @@ void http_session::handle_file_data(
             folder_id, 
             std::move(folder_path), 
             std::move(file),
-            std::move(db),
+            std::move(db_conn),
             std::move(file_ids_and_paths)));
 }

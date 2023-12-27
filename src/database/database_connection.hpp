@@ -1,5 +1,5 @@
-#ifndef DATABASE_HPP
-#define DATABASE_HPP
+#ifndef DATABASE_CONNECTION_HPP
+#define DATABASE_CONNECTION_HPP
 
 //local
 #include <logging/logger.hpp>
@@ -12,17 +12,16 @@
 #include <pqxx/connection>
 #include <pqxx/result>
 #include <pqxx/transaction>
-#include <pqxx/nontransaction>
 #include <boost/json.hpp>
 
 namespace json = boost::json;   
 
-class database
+class database_connection
 {
     public:
         // Connect to the database by given parameters
         // Can throw exception if it couldn't connect to the database
-        database(
+        database_connection(
             std::string_view username, 
             std::string_view password, 
             std::string_view host, 

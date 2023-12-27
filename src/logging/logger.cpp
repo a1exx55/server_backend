@@ -10,12 +10,13 @@ BOOST_LOG_GLOBAL_LOGGER_INIT(_logger_mt, src::severity_logger_mt)
         << "] <" << expr::attr<logging::trivial::severity_level>("Severity") << "> ["
         << expr::attr<std::string>("File") << ":" 
         << expr::attr<int>("Line") << "] ["
-        << expr::attr<std::string>("Function") << "] "
-        << expr::smessage;
+        << expr::attr<std::string>("Function") << "] \""
+        << expr::smessage << "\"";
 
     logging::add_file_log(
         logging::keywords::file_name = config::LOG_FILE_PATH,
         logging::keywords::open_mode = std::ios::app,
+        logging::keywords::auto_flush = true,
         logging::keywords::format = _format);
         
     if (config::CONSOLE_LOG_ENABLED)
@@ -29,5 +30,6 @@ BOOST_LOG_GLOBAL_LOGGER_INIT(_logger_mt, src::severity_logger_mt)
     (
         logging::trivial::severity >= logging::trivial::debug
     );
+    
     return _logger_mt;
 }
