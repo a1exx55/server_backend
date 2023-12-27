@@ -155,6 +155,18 @@ class http_session : public std::enable_shared_from_this<http_session>
                 {true, jwt_token_type::REFRESH_TOKEN, request_handlers::change_password}
             },
             {
+                {"/api/file_system/folders", http::verb::post, uri_params::type::NO},
+                {true, jwt_token_type::ACCESS_TOKEN, request_handlers::create_folder}
+            },
+            {
+                {"/api/file_system/files", http::verb::get, uri_params::type::QUERY},
+                {false, jwt_token_type::ACCESS_TOKEN, request_handlers::get_files_info}
+            },
+            {
+                {"/api/file_system/folders", http::verb::get, uri_params::type::NO},
+                {false, jwt_token_type::ACCESS_TOKEN, request_handlers::get_folders_info}
+            },
+            {
                 {"/api/file_system/files", http::verb::post, uri_params::type::QUERY},
                 {true, jwt_token_type::ACCESS_TOKEN, [](const request_params&, response_params&){}}
             }

@@ -29,6 +29,12 @@ namespace request_handlers
 
     void change_password(const request_params& request, response_params& response);
 
+    void create_folder(const request_params& request, response_params& response);
+
+    void get_folders_info(const request_params& request, response_params& response);
+
+    void get_files_info(const request_params& request, response_params& response);
+
     void process_downloaded_files(std::list<std::pair<size_t, std::string>>&& file_ids_and_paths);
 
     void prepare_error_response(

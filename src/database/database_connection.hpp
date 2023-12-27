@@ -22,16 +22,16 @@ class database_connection
         // Connect to the database by given parameters
         // Can throw exception if it couldn't connect to the database
         database_connection(
-            std::string_view username, 
+            std::string_view user_name, 
             std::string_view password, 
             std::string_view host, 
             size_t port,
             std::string_view database_name);
 
-        // Check if the user with given username and password exists in database
+        // Check if the user with given user_name and password exists in database
         // Return the user id on finding, otherwise return 0(user ids start with 1)
         // Return empty std::optional on fail
-        std::optional<size_t> login(std::string_view username, std::string_view password);
+        std::optional<size_t> login(std::string_view user_name, std::string_view password);
 
         // Insert refresh token to the 'refresh_tokens' table and insert session to the 'sessions' table with given data
         // Temporary session can be only one so before inserting we close the previous one
@@ -62,6 +62,15 @@ class database_connection
             size_t user_id, 
             std::string_view new_password, 
             std::string_view refresh_token);
+
+        std::optional<json::object> insert_folder(
+            size_t user_id, 
+            std::string_view user_name, 
+            std::string_view folder_name);
+
+        std::optional<json::array> get_folders_info();
+
+        std::optional<json::object> get_files_info(size_t folder_id);
 
         // Return folder path by the given folder id on folder existence otherwise return empty string
         // Return empty std::optional on fail

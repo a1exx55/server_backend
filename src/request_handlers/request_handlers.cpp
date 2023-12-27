@@ -450,6 +450,162 @@ void request_handlers::change_password(const request_params& request, response_p
     }  
 }
 
+void request_handlers::create_folder(const request_params& request, response_params& response)
+{
+    try
+    {
+        std::string folder_name = json::parse(request.body).as_object().at("folderName").as_string().c_str();
+
+        // Folder name can't contain only space symbols
+        if (std::all_of(folder_name.begin(), folder_name.end(), [](unsigned char c) { return std::isspace(c); }))
+        {
+            return prepare_error_response(
+                response, 
+                http::status::unprocessable_entity, 
+                "Invalid folder name format");
+        }
+
+        // Transform the string to UnicodeString and check the actual length of unicode symbols
+        // Folder name can't be longer than 64 symbols
+        if (icu::UnicodeString{folder_name.c_str()}.length() > 64) 
+        {
+            return prepare_error_response(
+                response, 
+                http::status::unprocessable_entity, 
+                "Invalid folder name format");
+        }
+
+        database_connection_wrapper db_conn = database_connections_pool::get();
+ 
+        // No available connections
+        if (!db_conn)
+        {
+            return prepare_error_response(
+                response, 
+                http::status::internal_server_error, 
+                "No available database connections");
+        }
+
+        size_t user_id;
+        std::string user_name;
+
+        // Get user's id and name claims from the access token
+        jwt_utils::get_token_claim(std::string{request.access_token}, "userId", user_id);
+        jwt_utils::get_token_claim(std::string{request.access_token}, "nickname", user_name);
+
+        // Insert folder with given name and get the json with data of this folder
+        std::optional<json::object> folder_data_json_opt = db_conn->insert_folder(
+            user_id,
+            user_name,
+            folder_name);
+
+        // An error occured with database connection
+        if (!folder_data_json_opt.has_value())
+        {
+            return prepare_error_response(
+                response, 
+                http::status::internal_server_error, 
+                "Internal server error occured");
+        }
+
+        // Folder with given name already exists
+        if (folder_data_json_opt->empty())
+        {
+            return prepare_error_response(
+                response, 
+                http::status::conflict, 
+                "Folder with this name already exists");
+        }
+
+        // Initialize response
+        response.body = json::serialize(folder_data_json_opt.value());
+    }
+    catch(const std::exception&)
+    {
+        return prepare_error_response(
+            response, 
+            http::status::unprocessable_entity, 
+            "Invalid body format");
+    }
+}
+
+void request_handlers::get_folders_info(const request_params& request, response_params& response)
+{
+    database_connection_wrapper db_conn = database_connections_pool::get();
+
+    // No available connections
+    if (!db_conn)
+    {
+        return prepare_error_response(
+            response, 
+            http::status::internal_server_error, 
+            "No available database connections");
+    }
+    
+    // Get all folders info in json format
+    std::optional<json::array> folders_info_array_opt = db_conn->get_folders_info(); 
+
+    // An error occured with database connection
+    if (!folders_info_array_opt.has_value())
+    {
+        return prepare_error_response(
+            response, 
+            http::status::internal_server_error, 
+            "Internal server error occured");
+    }
+    
+    // Initialize body with string representation of json
+    response.body = json::serialize(folders_info_array_opt.value());
+}
+
+void request_handlers::get_files_info(const request_params& request, response_params& response)
+{
+    size_t folder_id;
+
+    if (!uri_params::get_query_parameters(request.uri, "folderId", folder_id))
+    {
+        return prepare_error_response(
+            response,
+            http::status::unprocessable_entity, 
+            "Invalid folder id");
+    }
+
+    database_connection_wrapper db_conn = database_connections_pool::get();
+
+    // No available connections
+    if (!db_conn)
+    {
+        return prepare_error_response(
+            response, 
+            http::status::internal_server_error, 
+            "No available database connections");
+    }
+    
+    // Get all files info in json format
+    std::optional<json::object> files_info_json_opt = db_conn->get_files_info(folder_id); 
+
+    // An error occured with database connection
+    if (!files_info_json_opt.has_value())
+    {
+        return prepare_error_response(
+            response, 
+            http::status::internal_server_error, 
+            "Internal server error occured");
+    }
+
+    // Folder with given id doesn't exist
+    if (files_info_json_opt->empty())
+    {
+        return prepare_error_response(
+            response, 
+            http::status::not_found, 
+            "Folder was not found");
+    }
+    
+    // Initialize body with string representation of json
+    response.body = json::serialize(files_info_json_opt.value());
+}
+
 void request_handlers::process_downloaded_files(std::list<std::pair<size_t, std::string>>&& file_ids_and_paths)
 {
 }
