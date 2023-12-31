@@ -34,7 +34,7 @@ bool database_connection::reconnect()
 
 bool database_connection::close_all_sessions_except_current_impl(
     pqxx::work& transaction, 
-    size_t user_id, 
+    size_t user_id,
     std::string_view refresh_token)
 {
     try
@@ -59,6 +59,26 @@ bool database_connection::close_all_sessions_except_current_impl(
     {
         return false;
     }
+}
+
+bool database_connection::check_folder_existence_by_name_impl(
+    pqxx::work& transaction, 
+    std::string_view folder_name)
+{
+    // Check if the folder with given name already exists
+    return transaction.query_value<bool>(
+        "SELECT EXISTS(SELECT 1 FROM folders WHERE name=" + transaction.quote(folder_name) + ")");
+}
+
+bool database_connection::check_file_existence_by_name_impl(
+        pqxx::work& transaction, 
+        size_t folder_id, 
+        std::string_view file_name)
+{
+    // Check if the file with given name already exists
+    return transaction.query_value<bool>(
+        "SELECT EXISTS(SELECT 1 FROM files WHERE folder_id=" + pqxx::to_string(folder_id) + 
+        " AND name=" + transaction.quote(file_name) + ")");
 }
 
 std::optional<size_t> database_connection::login(std::string_view user_name, std::string_view password)
@@ -283,12 +303,13 @@ std::optional<bool> database_connection::update_refresh_token(
 std::optional<json::object> database_connection::get_sessions_info(size_t user_id, std::string_view refresh_token)
 {
     pqxx::work transaction{*_conn};
-    json::object sessions_json;
 
     try
     {
         size_t refresh_token_id = transaction.query_value<size_t>(
             "SELECT id FROM refresh_tokens WHERE token=" + transaction.quote(refresh_token));
+
+        json::object sessions_json;
 
         // Use another scope because variables below will be defined again later
         {
@@ -297,16 +318,16 @@ std::optional<json::object> database_connection::get_sessions_info(size_t user_i
                 transaction.query1<size_t, std::string, std::string, std::string, std::string>(
                     "SELECT id,login_date,last_seen_date,user_agent,ip FROM sessions "
                     "WHERE refresh_token_id=" + pqxx::to_string(refresh_token_id));
-
+            
             sessions_json.emplace(
                 "currentSession",
                 json::object
                 {
                     {"id", id},
-                    {"loginDate", login_date},
-                    {"lastSeenDate", last_seen_date},
-                    {"userAgent", user_agent},
-                    {"ip", ip}
+                    {"loginDate", std::move(login_date)},
+                    {"lastSeenDate", std::move(last_seen_date)},
+                    {"userAgent", std::move(user_agent)},
+                    {"ip", std::move(ip)}
                 });
         }
 
@@ -324,10 +345,10 @@ std::optional<json::object> database_connection::get_sessions_info(size_t user_i
                 json::object
                 {
                     {"id", id},
-                    {"loginDate", login_date},
-                    {"lastSeenDate", last_seen_date},
-                    {"userAgent", user_agent},
-                    {"ip", ip}
+                    {"loginDate", std::move(login_date)},
+                    {"lastSeenDate", std::move(last_seen_date)},
+                    {"userAgent", std::move(user_agent)},
+                    {"ip", std::move(ip)}
                 });
         }   
 
@@ -344,10 +365,10 @@ std::optional<json::object> database_connection::get_sessions_info(size_t user_i
                 json::object
                 {
                     {"id", id},
-                    {"loginDate", login_date},
-                    {"logoutDate", logout_date},
-                    {"userAgent", user_agent},
-                    {"ip", ip}
+                    {"loginDate", std::move(login_date)},
+                    {"logoutDate", std::move(logout_date)},
+                    {"userAgent", std::move(user_agent)},
+                    {"ip", std::move(ip)}
                 });
         }    
 
@@ -529,67 +550,6 @@ std::optional<bool> database_connection::change_password(
     } 
 }
 
-std::optional<json::object> database_connection::insert_folder(
-    size_t user_id, 
-    std::string_view user_name, 
-    std::string_view folder_name)
-{
-    pqxx::work transaction{*_conn};
-    
-    try
-    {
-        // Check if the folder with given name already exists
-        bool does_folder_already_exist = transaction.query_value<bool>(
-            "SELECT EXISTS(SELECT 1 FROM folders WHERE name=" + transaction.quote(folder_name) + ")");
-
-        // Folder names must be unique
-        if (does_folder_already_exist)
-        {
-            return json::object{};
-        }
-
-        // Insert folder with given data
-        size_t folder_id = transaction.query_value<size_t>(
-            "WITH current_id AS (SELECT nextval('folders_id_seq')) INSERT INTO folders "
-            "(id,name,path,created_by_user_id) VALUES ((SELECT * FROM current_id)," + 
-            transaction.quote(folder_name) + "," + transaction.quote(config::FOLDERS_PATH) +
-            "|| (SELECT * FROM current_id)::text || '/'," + pqxx::to_string(user_id) + ") RETURNING id");
-
-        json::object folder_data_json;
-
-        // Construct json with data of newly inserted folder
-        folder_data_json.emplace("id", folder_id);
-        folder_data_json.emplace("name", folder_name);
-        folder_data_json.emplace("lastUploadDate", nullptr);
-        folder_data_json.emplace("createdBy", user_name);
-        folder_data_json.emplace("filesNumber", 0);
-
-        transaction.commit();
-
-        return folder_data_json;
-    }
-    // Connection is lost
-    catch (const pqxx::broken_connection& ex)
-    {
-        transaction.abort();
-        
-        if (reconnect())
-        {
-            return insert_folder(user_id, user_name, folder_name);
-        }
-        else
-        {
-            LOG_ERROR << ex.what();
-            return {};
-        }
-    }
-    catch (const std::exception& ex)
-    {
-        LOG_ERROR << ex.what();
-        return {};
-    } 
-}
-
 std::optional<json::array> database_connection::get_folders_info()
 {
     pqxx::work transaction{*_conn};
@@ -652,6 +612,186 @@ std::optional<json::array> database_connection::get_folders_info()
     } 
 }
 
+std::optional<bool> database_connection::check_folder_existence_by_name(std::string_view folder_name)
+{
+    pqxx::work transaction{*_conn};
+    
+    try
+    {
+        return check_folder_existence_by_name_impl(
+            transaction,
+            folder_name);
+    }
+    // Connection is lost
+    catch (const pqxx::broken_connection& ex)
+    {
+        transaction.abort();
+        
+        if (reconnect())
+        {
+            return check_folder_existence_by_name(folder_name);
+        }
+        else
+        {
+            LOG_ERROR << ex.what();
+            return {};
+        }
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_ERROR << ex.what();
+        return {};
+    }
+}
+
+std::optional<std::pair<json::object, std::string>> database_connection::insert_folder(
+    size_t user_id, 
+    std::string_view user_name, 
+    std::string_view folder_name)
+{
+    pqxx::work transaction{*_conn};
+    
+    try
+    {
+        // Insert folder with given data
+        auto [folder_id, folder_path] = transaction.query1<size_t, std::string>(
+            "WITH current_id AS (SELECT nextval('folders_id_seq')) INSERT INTO folders "
+            "(id,name,path,created_by_user_id) VALUES ((SELECT * FROM current_id)," + 
+            transaction.quote(folder_name) + "," + transaction.quote(config::FOLDERS_PATH) +
+            "|| (SELECT * FROM current_id)::text || '/'," + pqxx::to_string(user_id) + ") RETURNING id,path");
+
+        json::object folder_data_json;
+
+        // Construct json with data of newly inserted folder
+        folder_data_json.emplace("id", folder_id);
+        folder_data_json.emplace("name", folder_name);
+        folder_data_json.emplace("lastUploadDate", nullptr);
+        folder_data_json.emplace("createdBy", user_name);
+        folder_data_json.emplace("filesNumber", 0);
+
+        transaction.commit();
+
+        return std::pair{folder_data_json, folder_path};
+    }
+    // Connection is lost
+    catch (const pqxx::broken_connection& ex)
+    {
+        transaction.abort();
+        
+        if (reconnect())
+        {
+            return insert_folder(user_id, user_name, folder_name);
+        }
+        else
+        {
+            LOG_ERROR << ex.what();
+            return {};
+        }
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_ERROR << ex.what();
+        return {};
+    } 
+}
+
+std::optional<std::pair<std::vector<size_t>, std::vector<std::string>>> database_connection::delete_folders(
+    const std::vector<size_t>& folder_ids)
+{
+    pqxx::work transaction{*_conn};
+    
+    try
+    {
+        std::vector<size_t> deleted_folder_ids;
+        std::vector<std::string> deleted_folder_paths;
+
+        std::string query = "DELETE FROM folders WHERE id IN (";
+        
+        for (size_t folder_id : folder_ids)
+        {
+            query.append(std::to_string(folder_id) + ",");
+        }
+
+        query.erase(query.size() - 1);
+        query.append(
+            ") AND NOT (SELECT EXISTS(SELECT 1 FROM files WHERE folder_id=folders.id AND "
+            "status<>'ready_for_parsing')) RETURNING id,path");
+
+        for (auto [deleted_folder_id, deleted_folder_path] : transaction.query<size_t, std::string>(query))
+        {
+            deleted_folder_ids.emplace_back(deleted_folder_id);
+            deleted_folder_paths.emplace_back(std::move(deleted_folder_path));
+        }
+
+        transaction.commit();
+
+        return std::pair{deleted_folder_ids, deleted_folder_paths};
+    }
+    // Connection is lost
+    catch (const pqxx::broken_connection& ex)
+    {
+        transaction.abort();
+        
+        if (reconnect())
+        {
+            return delete_folders(folder_ids);
+        }
+        else
+        {
+            LOG_ERROR << ex.what();
+            return {};
+        }
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_ERROR << ex.what();
+        return {};
+    } 
+}
+
+std::optional<bool> database_connection::rename_folder(size_t folder_id, std::string_view new_folder_name)
+{
+    pqxx::work transaction{*_conn};
+    
+    try
+    {
+        _result = transaction.exec0(
+            "UPDATE folders SET name=" + transaction.quote(new_folder_name) + 
+            " WHERE id=" + pqxx::to_string(folder_id));
+
+        // Check if the update has occured i.e. folder with given id actually exists
+        if (_result.affected_rows())
+        {
+            transaction.commit();
+            return true;
+        }
+        else
+        {
+            return false;
+        }
+    }
+    // Connection is lost
+    catch (const pqxx::broken_connection& ex)
+    {
+        transaction.abort();
+        
+        if (reconnect())
+        {
+            return rename_folder(folder_id, new_folder_name);
+        }
+        else
+        {
+            LOG_ERROR << ex.what();
+            return {};
+        }
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_ERROR << ex.what();
+        return {};
+    } 
+}
+
 std::optional<json::object> database_connection::get_files_info(size_t folder_id)
 {
     pqxx::work transaction{*_conn};
@@ -674,7 +814,7 @@ std::optional<json::object> database_connection::get_files_info(size_t folder_id
         json::object file_data_json;
 
         for (auto [id, name, size, upload_date, uploaded_by, status] : 
-            transaction.query<size_t, std::string, size_t, std::optional<std::string>, std::string, std::string>(
+            transaction.query<size_t, std::string, std::optional<size_t>, std::optional<std::string>, std::string, std::string>(
                 "SELECT files.id,files.name || '.' || files.extension,files.size,files.upload_date,users.nickname,"
                 "files.status FROM files JOIN users ON files.uploaded_by_user_id=users.id " 
                 "WHERE files.folder_id=" + pqxx::to_string(folder_id)))
@@ -684,12 +824,20 @@ std::optional<json::object> database_connection::get_files_info(size_t folder_id
                 {
                     {"id", id},
                     {"name", name},
-                    {"size", size},
                     {"uploadedBy", uploaded_by},
                     {"status", status}
                 };
 
-            // Upload date may be null so process it separately
+            // Size and upload date may be null so process them separately
+            if (size.has_value())
+            {
+                file_data_json.emplace("size", size.value());
+            }
+            else
+            {
+                file_data_json.emplace("size", nullptr);
+            }
+
             if (upload_date.has_value())
             {
                 file_data_json.emplace("uploadDate", upload_date.value());
@@ -775,8 +923,10 @@ std::optional<bool> database_connection::check_file_existence_by_name(size_t fol
     
     try
     {
-        return transaction.query_value<bool>("SELECT EXISTS(SELECT 1 FROM files WHERE folder_id=" + 
-            pqxx::to_string(folder_id) + " AND name=" + transaction.quote(file_name) + ")");
+        return check_file_existence_by_name_impl(
+            transaction,
+            folder_id,
+            file_name);
     }
     // Connection is lost
     catch (const pqxx::broken_connection& ex)
@@ -912,4 +1062,170 @@ std::optional<std::monostate> database_connection::update_uploaded_file(size_t f
         LOG_ERROR << ex.what();
         return {};
     }
+}
+
+std::optional<std::monostate> database_connection::change_file_status(size_t file_id, file_status new_status)
+{
+    pqxx::work transaction{*_conn};
+    
+    try
+    {
+        transaction.exec0("UPDATE files SET status=" + transaction.quote(magic_enum::enum_name(new_status)) + 
+            " WHERE id=" + pqxx::to_string(file_id));
+        
+        transaction.commit();
+    
+        return std::monostate{};
+    }
+    // Connection is lost
+    catch (const pqxx::broken_connection& ex)
+    {
+        transaction.abort();
+        
+        if (reconnect())
+        {
+            return change_file_status(file_id, new_status);
+        }
+        else
+        {
+            LOG_ERROR << ex.what();
+            return {};
+        }
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_ERROR << ex.what();
+        return {};
+    }
+}
+
+std::optional<std::pair<std::vector<size_t>, std::vector<std::string>>> database_connection::delete_files(
+    const std::vector<size_t>& file_ids)
+{
+    pqxx::work transaction{*_conn};
+    
+    try
+    {
+        std::vector<size_t> deleted_file_ids;
+        std::vector<std::string> deleted_file_paths;
+
+        std::string query = "DELETE FROM files WHERE id IN (";
+        
+        for (size_t file_id : file_ids)
+        {
+            query.append(std::to_string(file_id) + ",");
+        }
+
+        query.erase(query.size() - 1);
+        query.append(") AND status='ready_for_parsing' RETURNING id,path");
+
+        for (auto [deleted_file_id, deleted_file_path] : transaction.query<size_t, std::string>(query))
+        {
+            deleted_file_ids.emplace_back(deleted_file_id);
+            deleted_file_paths.emplace_back(std::move(deleted_file_path));
+        }
+
+        transaction.commit();
+
+        return std::pair{deleted_file_ids, deleted_file_paths};
+    }
+    // Connection is lost
+    catch (const pqxx::broken_connection& ex)
+    {
+        transaction.abort();
+        
+        if (reconnect())
+        {
+            return delete_files(file_ids);
+        }
+        else
+        {
+            LOG_ERROR << ex.what();
+            return {};
+        }
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_ERROR << ex.what();
+        return {};
+    } 
+}
+
+std::optional<size_t> database_connection::get_folder_id_by_file_id(size_t file_id)
+{
+    pqxx::work transaction{*_conn};
+    
+    try
+    {
+        return transaction.query_value<size_t>(
+            "SELECT folder_id FROM files WHERE id=" + pqxx::to_string(file_id));
+    }
+    // Connection is lost
+    catch (const pqxx::broken_connection& ex)
+    {
+        transaction.abort();
+        
+        if (reconnect())
+        {
+            return get_folder_id_by_file_id(file_id);
+        }
+        else
+        {
+            LOG_ERROR << ex.what();
+            return {};
+        }
+    }
+    // File with given id doesn't exist
+    catch (const pqxx::unexpected_rows&)
+    {
+        return 0;
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_ERROR << ex.what();
+        return {};
+    } 
+}
+
+std::optional<bool> database_connection::rename_file(size_t file_id, std::string_view new_file_name)
+{
+    pqxx::work transaction{*_conn};
+    
+    try
+    {
+        _result = transaction.exec0(
+            "UPDATE files SET name=" + transaction.quote(new_file_name) + 
+            " WHERE id=" + pqxx::to_string(file_id));
+
+        // Check if the update has occured i.e. file with given id actually exists
+        if (_result.affected_rows())
+        {
+            transaction.commit();
+            return true;
+        }
+        else
+        {
+            return false;
+        }
+    }
+    // Connection is lost
+    catch (const pqxx::broken_connection& ex)
+    {
+        transaction.abort();
+        
+        if (reconnect())
+        {
+            return rename_file(file_id, new_file_name);
+        }
+        else
+        {
+            LOG_ERROR << ex.what();
+            return {};
+        }
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_ERROR << ex.what();
+        return {};
+    } 
 }

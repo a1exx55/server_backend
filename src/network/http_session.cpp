@@ -613,7 +613,10 @@ void http_session::handle_file_header(
         // If there are downloaded files then start separately processing them and close the connection
         if (!file_ids_and_paths.empty())
         {
-            std::thread{request_handlers::process_downloaded_files, std::move(file_ids_and_paths)}.detach();
+            std::thread{
+                request_handlers::process_downloaded_files, 
+                std::move(file_ids_and_paths), 
+                std::move(db_conn)}.detach();
         }
 
         return do_close();
@@ -634,7 +637,10 @@ void http_session::handle_file_header(
         // If there are downloaded files then start separately processing them and return response
         if (!file_ids_and_paths.empty())
         {
-            std::thread{request_handlers::process_downloaded_files, std::move(file_ids_and_paths)}.detach();
+            std::thread{
+                request_handlers::process_downloaded_files, 
+                std::move(file_ids_and_paths), 
+                std::move(db_conn)}.detach();
         }
 
         prepare_error_response(
@@ -657,7 +663,10 @@ void http_session::handle_file_header(
         // If there are downloaded files then start separately processing them and return response
         if (!file_ids_and_paths.empty())
         {
-            std::thread{request_handlers::process_downloaded_files, std::move(file_ids_and_paths)}.detach();
+            std::thread{
+                request_handlers::process_downloaded_files, 
+                std::move(file_ids_and_paths), 
+                std::move(db_conn)}.detach();
         }
 
         prepare_error_response(
@@ -683,7 +692,10 @@ void http_session::handle_file_header(
         // If there are downloaded files then start separately processing them and return response
         if (!file_ids_and_paths.empty())
         {
-            std::thread{request_handlers::process_downloaded_files, std::move(file_ids_and_paths)}.detach();
+            std::thread{
+                request_handlers::process_downloaded_files, 
+                std::move(file_ids_and_paths), 
+                std::move(db_conn)}.detach();
         }
 
         prepare_error_response(
@@ -692,10 +704,13 @@ void http_session::handle_file_header(
         return do_write_response(false);
     }
 
-    // Check if the string contains only space symbols
-    // In this case consider it as the empty string and assign it with "(1)" like it is the copy of empty string 
+    // Trim whitespaces at the beggining and at the end of the file name
+    boost::algorithm::trim(file_name);
+
+    // Check if the string is empty after the trim
+    // In this case assign it with "(1)" like it is the copy of empty string 
     // because it is forbidden to have empty file name
-    if (std::all_of(file_name.begin(), file_name.end(), [](unsigned char c) { return std::isspace(c); }))
+    if (file_name.empty())
     {
         file_name = "(1)";
     }
@@ -727,7 +742,10 @@ void http_session::handle_file_header(
             // If there are downloaded files then start separately processing them and return response
             if (!file_ids_and_paths.empty())
             {
-                std::thread{request_handlers::process_downloaded_files, std::move(file_ids_and_paths)}.detach();
+                std::thread{
+                request_handlers::process_downloaded_files, 
+                std::move(file_ids_and_paths), 
+                std::move(db_conn)}.detach();
             }
             
             prepare_error_response(
@@ -791,7 +809,10 @@ void http_session::handle_file_header(
         // If there are downloaded files then start separately processing them and return response
         if (!file_ids_and_paths.empty())
         {
-            std::thread{request_handlers::process_downloaded_files, std::move(file_ids_and_paths)}.detach();
+            std::thread{
+                request_handlers::process_downloaded_files, 
+                std::move(file_ids_and_paths), 
+                std::move(db_conn)}.detach();
         }
         
         prepare_error_response(
@@ -889,7 +910,10 @@ void http_session::handle_file_data(
         // If there are downloaded files then start separately processing them and return response
         if (!file_ids_and_paths.empty())
         {
-            std::thread{request_handlers::process_downloaded_files, std::move(file_ids_and_paths)}.detach();
+            std::thread{
+                request_handlers::process_downloaded_files, 
+                std::move(file_ids_and_paths), 
+                std::move(db_conn)}.detach();
         }
     };
 
@@ -951,7 +975,10 @@ void http_session::handle_file_data(
     // So start processing downloaded files and send response
     if (std::string_view{asio::buffer_cast<const char*>(buffer.data()), buffer.size()} == "--\r\n")
     {
-        std::thread{request_handlers::process_downloaded_files, std::move(file_ids_and_paths)}.detach();
+        std::thread{
+                request_handlers::process_downloaded_files, 
+                std::move(file_ids_and_paths), 
+                std::move(db_conn)}.detach();
 
         _response.result(http::status::ok);
         _response.prepare_payload();

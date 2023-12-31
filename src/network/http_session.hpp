@@ -102,7 +102,7 @@ class http_session : public std::enable_shared_from_this<http_session>
             size_t folder_id,
             std::string&& folder_path, 
             std::ofstream&& file,
-            database_connection_wrapper&& db, 
+            database_connection_wrapper&& db_conn, 
             std::list<std::pair<size_t, std::string>>&& file_paths,
             beast::error_code error_code, std::size_t bytes_transferred);
 
@@ -155,20 +155,36 @@ class http_session : public std::enable_shared_from_this<http_session>
                 {true, jwt_token_type::REFRESH_TOKEN, request_handlers::change_password}
             },
             {
+                {"/api/file_system/folders", http::verb::get, uri_params::type::NO},
+                {false, jwt_token_type::ACCESS_TOKEN, request_handlers::get_folders_info}
+            },
+            {
                 {"/api/file_system/folders", http::verb::post, uri_params::type::NO},
                 {true, jwt_token_type::ACCESS_TOKEN, request_handlers::create_folder}
+            },
+            {
+                {"/api/file_system/folders", http::verb::delete_, uri_params::type::QUERY},
+                {false, jwt_token_type::ACCESS_TOKEN, request_handlers::delete_folders}
+            },
+            {
+                {"/api/file_system/folders", http::verb::patch, uri_params::type::PATH},
+                {true, jwt_token_type::ACCESS_TOKEN, request_handlers::rename_folder}
             },
             {
                 {"/api/file_system/files", http::verb::get, uri_params::type::QUERY},
                 {false, jwt_token_type::ACCESS_TOKEN, request_handlers::get_files_info}
             },
             {
-                {"/api/file_system/folders", http::verb::get, uri_params::type::NO},
-                {false, jwt_token_type::ACCESS_TOKEN, request_handlers::get_folders_info}
-            },
-            {
                 {"/api/file_system/files", http::verb::post, uri_params::type::QUERY},
                 {true, jwt_token_type::ACCESS_TOKEN, [](const request_params&, response_params&){}}
+            },
+            {
+                {"/api/file_system/files", http::verb::delete_, uri_params::type::QUERY},
+                {false, jwt_token_type::ACCESS_TOKEN, request_handlers::delete_files}
+            },
+            {
+                {"/api/file_system/files", http::verb::patch, uri_params::type::PATH},
+                {true, jwt_token_type::ACCESS_TOKEN, request_handlers::rename_file}
             }
         };
 }; 
