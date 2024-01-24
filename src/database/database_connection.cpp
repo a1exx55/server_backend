@@ -881,14 +881,14 @@ std::optional<json::object> database_connection::get_files_info(size_t folder_id
     } 
 }
 
-std::optional<std::string> database_connection::get_folder_path(size_t folder_id)
+std::optional<bool> database_connection::check_folder_existence_by_id(size_t folder_id)
 {
     pqxx::work transaction{*_conn};
     
     try
     {
-        return transaction.query_value<std::string>(
-            "SELECT path FROM folders WHERE id=" + pqxx::to_string(folder_id));
+        return transaction.query_value<bool>(
+            "SELECT EXISTS(SELECT 1 FROM folders WHERE id=" + pqxx::to_string(folder_id) + ")");
     }
     // Connection is lost
     catch (const pqxx::broken_connection& ex)
@@ -897,18 +897,13 @@ std::optional<std::string> database_connection::get_folder_path(size_t folder_id
         
         if (reconnect())
         {
-            return get_folder_path(folder_id);
+            return check_folder_existence_by_id(folder_id);
         }
         else
         {
             LOG_ERROR << ex.what();
             return {};
         }
-    }
-    // Folder with given folder_id doesn't exist
-    catch (const pqxx::unexpected_rows&)
-    {
-        return std::string{};
     }
     catch (const std::exception& ex)
     {
@@ -950,10 +945,9 @@ std::optional<bool> database_connection::check_file_existence_by_name(size_t fol
     }
 }
 
-std::optional<std::pair<size_t, std::string>> database_connection::insert_file(
+std::optional<std::pair<size_t, std::string>> database_connection::insert_uploading_file(
     size_t user_id, 
     size_t folder_id,
-    std::string_view folder_path,
     std::string_view file_name,
     std::string_view file_extension)
 {
@@ -965,9 +959,9 @@ std::optional<std::pair<size_t, std::string>> database_connection::insert_file(
             "WITH current_id AS (SELECT nextval('files_id_seq')) INSERT INTO files (id,name,extension," 
             "path,folder_id,uploaded_by_user_id) VALUES ((SELECT * FROM current_id)," + 
             transaction.quote(file_name) + "," + transaction.quote(file_extension) + "," + 
-            transaction.quote(folder_path) + "||(SELECT * FROM current_id)::text||'.'||" + 
-            transaction.quote(file_extension) + "," + pqxx::to_string(folder_id) + "," + 
-            pqxx::to_string(user_id) + ") RETURNING id, path");
+            transaction.quote(config::FOLDERS_PATH + pqxx::to_string(folder_id)) + 
+            "||'/'||(SELECT * FROM current_id)::text||'.'||" + transaction.quote(file_extension) + "," + 
+            pqxx::to_string(folder_id) + "," + pqxx::to_string(user_id) + ") RETURNING id, path");
 
         transaction.commit();
 
@@ -980,7 +974,7 @@ std::optional<std::pair<size_t, std::string>> database_connection::insert_file(
         
         if (reconnect())
         {
-            return insert_file(user_id, folder_id, folder_path, file_name, file_extension);
+            return insert_uploading_file(user_id, folder_id, file_name, file_extension);
         }
         else
         {
@@ -1050,6 +1044,52 @@ std::optional<std::monostate> database_connection::update_uploaded_file(size_t f
         if (reconnect())
         {
             return update_uploaded_file(file_id, file_size);
+        }
+        else
+        {
+            LOG_ERROR << ex.what();
+            return {};
+        }
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_ERROR << ex.what();
+        return {};
+    }
+}
+
+std::optional<std::pair<size_t, std::string>> database_connection::insert_unzipped_file(
+    size_t user_id,
+    size_t folder_id,
+    std::string_view file_name,
+    std::string_view file_extension,
+    size_t file_size)
+{
+    pqxx::work transaction{*_conn};
+    
+    try
+    {
+        auto [file_id, file_path] = transaction.query1<size_t, std::string>(
+            "WITH current_id AS (SELECT nextval('files_id_seq')) INSERT INTO files (id,name,extension," 
+            "path,folder_id,size,upload_date,uploaded_by_user_id,status) VALUES ((SELECT * FROM current_id)," + 
+            transaction.quote(file_name) + "," + transaction.quote(file_extension) + "," + 
+            transaction.quote(config::FOLDERS_PATH + pqxx::to_string(folder_id)) + 
+            "||'/'||(SELECT * FROM current_id)::text||'.'||" + transaction.quote(file_extension) + "," + 
+            pqxx::to_string(folder_id) + "," + pqxx::to_string(file_size) + ",LOCALTIMESTAMP," + 
+            pqxx::to_string(user_id) + ",'uploaded') RETURNING id, path");
+
+        transaction.commit();
+
+        return {{file_id, file_path}};
+    }
+    // Connection is lost
+    catch (const pqxx::broken_connection& ex)
+    {
+        transaction.abort();
+        
+        if (reconnect())
+        {
+            return insert_unzipped_file(user_id, folder_id, file_name, file_extension, file_size);
         }
         else
         {

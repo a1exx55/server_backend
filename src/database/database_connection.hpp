@@ -90,9 +90,10 @@ class database_connection
 
         std::optional<json::object> get_files_info(size_t folder_id);
 
-        // Return folder path by the given folder id on folder existence otherwise return empty string
+        // Check if the folder with given id exists
+        // Return true on folder existence, otherwise return false
         // Return empty std::optional on fail
-        std::optional<std::string> get_folder_path(size_t folder_id);
+        std::optional<bool> check_folder_existence_by_id(size_t folder_id);
 
         // Check if the file with given name exists in the specified folder
         // Return true on file existence, otherwise return false
@@ -102,10 +103,9 @@ class database_connection
         // Insert new file to the 'files' table
         // Return a pair of newly inserted file's id and path
         // Return empty std::optional on fail
-        std::optional<std::pair<size_t, std::string>> insert_file(
+        std::optional<std::pair<size_t, std::string>> insert_uploading_file(
             size_t user_id,
             size_t folder_id, 
-            std::string_view folder_path,
             std::string_view file_name,
             std::string_view file_extension);
 
@@ -116,6 +116,13 @@ class database_connection
         // Update 'files' table by setting file size, upload date with current time and changing status to 'uploaded'
         // Return empty std::optional on fail
         std::optional<std::monostate> update_uploaded_file(size_t file_id, size_t file_size);
+
+        std::optional<std::pair<size_t, std::string>> insert_unzipped_file(
+            size_t user_id,
+            size_t folder_id,
+            std::string_view file_name,
+            std::string_view file_extension,
+            size_t file_size);
 
         std::optional<std::monostate> change_file_status(size_t file_id, file_status new_status);
 

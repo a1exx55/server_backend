@@ -10,10 +10,10 @@ namespace uri_params
 {
     enum class type
     {
-        NO, 
-        PATH,
-        QUERY,
-        PATH_AND_QUERY
+        no, 
+        path,
+        query,
+        path_and_query
     };
 
     // Return the uri excluding query or path parameters

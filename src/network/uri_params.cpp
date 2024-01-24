@@ -34,7 +34,7 @@ uri_params::type uri_params::determine_uri_parameters_type(std::string_view uri)
     // If slash is absent then uri is invalid
     if ((delimiter_position = uri.find('/', previous_delimiter_position)) == std::string::npos)
     {
-        return uri_params::type::NO;
+        return uri_params::type::no;
     }
 
     previous_delimiter_position = delimiter_position + 1;
@@ -45,21 +45,21 @@ uri_params::type uri_params::determine_uri_parameters_type(std::string_view uri)
         // If we also found the question mark in the uri then the there are both path and query parameters
         if (uri.find('?', delimiter_position + 1) != std::string::npos)
         {
-            return uri_params::type::PATH_AND_QUERY;
+            return uri_params::type::path_and_query;
         }
 
         // If we didn't find the question mark in the uri then there is only path parameter
-        return uri_params::type::PATH;
+        return uri_params::type::path;
     }
 
     // If we found the question mark in the uri then there are only query parameters
     if (uri.find('?', previous_delimiter_position) != std::string::npos)
     {
-        return uri_params::type::QUERY;
+        return uri_params::type::query;
     }
 
     // The uri is unparameterized
-    return uri_params::type::NO;
+    return uri_params::type::no;
 }
 
 json::object uri_params::get_query_parameters(std::string_view uri, size_t expected_params_number)

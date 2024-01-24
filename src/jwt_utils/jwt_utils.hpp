@@ -12,9 +12,9 @@ namespace json = boost::json;
 
 enum class jwt_token_type
 {
-    NO = 0,
-    ACCESS_TOKEN,
-    REFRESH_TOKEN
+    no = 0,
+    access_token,
+    refresh_token
 };
 
 class jwt_utils

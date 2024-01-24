@@ -66,9 +66,9 @@ class http_session : public std::enable_shared_from_this<http_session>
             beast::error_code error_code, 
             std::size_t bytes_transferred);
 
-        void prepare_error_response(const http::status response_status, std::string_view error_message);
+        void prepare_error_response(http::status response_status, std::string_view error_message);
 
-        void do_write_response(bool keep_alive = true);
+        void do_write_response(bool keep_alive);
 
         void on_write_response(bool keep_alive, beast::error_code error_code, std::size_t bytes_transferred);
 
@@ -78,29 +78,30 @@ class http_session : public std::enable_shared_from_this<http_session>
 
         void parse_response_params();
 
-        // Handle unexpected request attributes depending on whether the body is present or not
-        bool validate_request_attributes(bool has_body);
+        // Handle unexpected request attributes depending on the body present 
+        // and if the request is for downloading files
+        bool validate_request_attributes(bool has_body, bool is_downloading_files_request);
       
         // Validate jwt token depending on its type
         bool validate_jwt_token(jwt_token_type token_type);
 
-        void download_files();
+        void upload_files();
 
-        void handle_file_header(
+        void process_uploading_file_header(
             dynamic_buffer&& buffer, 
             std::string_view&& boundary,
+            size_t user_id,
             size_t folder_id,
-            std::string&& folder_path, 
             std::ofstream&& file,
             database_connection_wrapper&& db, 
             std::list<std::pair<size_t, std::string>>&& file_paths,
             beast::error_code error_code, std::size_t bytes_transferred);
 
-        void handle_file_data(
+        void process_uploading_file_data(
             dynamic_buffer&& buffer, 
             std::string_view&& boundary,
+            size_t user_id,
             size_t folder_id,
-            std::string&& folder_path, 
             std::ofstream&& file,
             database_connection_wrapper&& db_conn, 
             std::list<std::pair<size_t, std::string>>&& file_paths,
@@ -112,81 +113,19 @@ class http_session : public std::enable_shared_from_this<http_session>
         // String buffer for downloading files
         // Can't use the main one due to using asio read operations instead of beast
         std::string _files_string_buffer;
-        // Wrap in std::optional to use parser several times by invoking .emplace() every request
+        // Wrap parser in std::optional to use it several times as it can't be manually cleared 
         std::optional<http::request_parser<http::string_body>> _request_parser;
         http::response<http::string_body> _response;
-        // Encapsulation of request and response params to pass them to request handlers 
+        // Encapsulate request and response params to pass them to request handlers 
         // to avoid direct access to _request_parser and _response
         request_params _request_params;
         response_params _response_params;
         
-        // This map is used to determine what to do depends on the header target value
-        inline static const std::unordered_map<
+        // This map is used to determine what request handler to invoke depending on the request params
+        static const std::unordered_map<
             std::tuple<std::string_view, http::verb, uri_params::type>, 
             std::tuple<bool, jwt_token_type, const request_handler_t>, 
-            boost::hash<std::tuple<std::string_view, http::verb, uri_params::type>>> _requests_metadata
-        {
-            {
-                {"/api/user/login", http::verb::post, uri_params::type::NO},
-                {true, jwt_token_type::NO, request_handlers::login}
-            },
-            {
-                {"/api/user/logout", http::verb::post, uri_params::type::NO},
-                {false, jwt_token_type::REFRESH_TOKEN, request_handlers::logout}
-            },
-            {
-                {"/api/user/tokens", http::verb::put, uri_params::type::NO},
-                {false, jwt_token_type::REFRESH_TOKEN, request_handlers::refresh_tokens}
-            },
-            {
-                {"/api/user/sessions", http::verb::get, uri_params::type::NO},
-                {false, jwt_token_type::REFRESH_TOKEN, request_handlers::get_sessions_info}
-            },
-            {
-                {"/api/user/sessions", http::verb::delete_, uri_params::type::PATH},
-                {false, jwt_token_type::ACCESS_TOKEN, request_handlers::close_session}
-            },
-            {
-                {"/api/user/sessions", http::verb::delete_, uri_params::type::NO},
-                {false, jwt_token_type::REFRESH_TOKEN, request_handlers::close_all_sessions_except_current}
-            },
-            {
-                {"/api/user/password", http::verb::put, uri_params::type::NO},
-                {true, jwt_token_type::REFRESH_TOKEN, request_handlers::change_password}
-            },
-            {
-                {"/api/file_system/folders", http::verb::get, uri_params::type::NO},
-                {false, jwt_token_type::ACCESS_TOKEN, request_handlers::get_folders_info}
-            },
-            {
-                {"/api/file_system/folders", http::verb::post, uri_params::type::NO},
-                {true, jwt_token_type::ACCESS_TOKEN, request_handlers::create_folder}
-            },
-            {
-                {"/api/file_system/folders", http::verb::delete_, uri_params::type::QUERY},
-                {false, jwt_token_type::ACCESS_TOKEN, request_handlers::delete_folders}
-            },
-            {
-                {"/api/file_system/folders", http::verb::patch, uri_params::type::PATH},
-                {true, jwt_token_type::ACCESS_TOKEN, request_handlers::rename_folder}
-            },
-            {
-                {"/api/file_system/files", http::verb::get, uri_params::type::QUERY},
-                {false, jwt_token_type::ACCESS_TOKEN, request_handlers::get_files_info}
-            },
-            {
-                {"/api/file_system/files", http::verb::post, uri_params::type::QUERY},
-                {true, jwt_token_type::ACCESS_TOKEN, [](const request_params&, response_params&){}}
-            },
-            {
-                {"/api/file_system/files", http::verb::delete_, uri_params::type::QUERY},
-                {false, jwt_token_type::ACCESS_TOKEN, request_handlers::delete_files}
-            },
-            {
-                {"/api/file_system/files", http::verb::patch, uri_params::type::PATH},
-                {true, jwt_token_type::ACCESS_TOKEN, request_handlers::rename_file}
-            }
-        };
+            boost::hash<std::tuple<std::string_view, http::verb, uri_params::type>>> _requests_metadata;
 }; 
 
 #endif

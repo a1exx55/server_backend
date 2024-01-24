@@ -10,6 +10,7 @@
 #include <chrono>
 #include <fstream>
 #include <filesystem>
+#include <unordered_set>
 
 //external
 #include <boost/json.hpp>
@@ -25,7 +26,7 @@ namespace config
     inline uint_least16_t SERVER_PORT;
     inline std::string DOMAIN_NAME;
     inline int THREADS_NUMBER;
-    inline size_t DATABASES_NUMBER;
+    inline size_t DATABASE_CONNNECTIONS_NUMBER;
     inline size_t DATABASE_PORT;
     inline std::string DATABASE_NAME;
     inline std::string DATABASE_USERNAME;
@@ -36,8 +37,12 @@ namespace config
     inline std::string SSL_KEY_PATH;
     inline bool CONSOLE_LOG_ENABLED;
     inline std::string JWT_SECRET_KEY;
-    inline std::chrono::minutes ACCESS_TOKEN_EXPIRY_TIME;
-    inline std::chrono::days REFRESH_TOKEN_EXPIRY_TIME;
+    inline std::chrono::minutes ACCESS_TOKEN_EXPIRY_TIME_MINUTES;
+    inline std::chrono::days REFRESH_TOKEN_EXPIRY_TIME_DAYS;
+    inline std::unordered_set<std::string> ALLOWED_UPLOADING_FILE_EXTENSIONS;
+    inline std::unordered_set<std::string> ALLOWED_ARCHIVE_EXTENSIONS;
+    inline std::unordered_set<std::string> ALLOWED_PARSING_FILE_EXTENSIONS;
+    inline std::string PATH_TO_7ZIP_LIB;
 
     inline void init()
     {
@@ -62,7 +67,7 @@ namespace config
         SERVER_PORT = config_json.at("SERVER_PORT").to_number<uint_least16_t>();
         DOMAIN_NAME = config_json.at("DOMAIN_NAME").as_string();
         THREADS_NUMBER = config_json.at("THREADS_NUMBER").to_number<int>();
-        DATABASES_NUMBER = config_json.at("DATABASES_NUMBER").to_number<size_t>();
+        DATABASE_CONNNECTIONS_NUMBER = config_json.at("DATABASE_CONNNECTIONS_NUMBER").to_number<size_t>();
         DATABASE_PORT = config_json.at("DATABASE_PORT").to_number<size_t>();
         DATABASE_NAME = config_json.at("DATABASE_NAME").as_string();
         DATABASE_USERNAME = config_json.at("DATABASE_USERNAME").as_string();
@@ -73,10 +78,23 @@ namespace config
         SSL_KEY_PATH = config_json.at("SSL_KEY_PATH").as_string();
         CONSOLE_LOG_ENABLED = config_json.at("CONSOLE_LOG_ENABLED").as_bool();
         JWT_SECRET_KEY = config_json.at("JWT_SECRET_KEY").as_string();
-        ACCESS_TOKEN_EXPIRY_TIME = std::chrono::minutes{
-            config_json.at("ACCESS_TOKEN_EXPIRY_TIME").to_number<size_t>()};
-        REFRESH_TOKEN_EXPIRY_TIME = std::chrono::days{
-            config_json.at("REFRESH_TOKEN_EXPIRY_TIME").to_number<size_t>()};
+        ACCESS_TOKEN_EXPIRY_TIME_MINUTES = std::chrono::minutes{
+            config_json.at("ACCESS_TOKEN_EXPIRY_TIME_MINUTES").to_number<size_t>()};
+        REFRESH_TOKEN_EXPIRY_TIME_DAYS = std::chrono::days{
+            config_json.at("REFRESH_TOKEN_EXPIRY_TIME_DAYS").to_number<size_t>()};
+        for (auto file_extension : config_json.at("ALLOWED_UPLOADING_FILE_EXTENSIONS").as_array())
+        {
+            ALLOWED_UPLOADING_FILE_EXTENSIONS.emplace(file_extension.as_string());
+        }
+        for (auto archive_extension : config_json.at("ALLOWED_ARCHIVE_EXTENSIONS").as_array())
+        {
+            ALLOWED_ARCHIVE_EXTENSIONS.emplace(archive_extension.as_string());
+        }
+        for (auto file_extension : config_json.at("ALLOWED_PARSING_FILE_EXTENSIONS").as_array())
+        {
+            ALLOWED_PARSING_FILE_EXTENSIONS.emplace(file_extension.as_string());
+        }
+        PATH_TO_7ZIP_LIB = config_json.at("PATH_TO_7ZIP_LIB").as_string();
     }
 }
 

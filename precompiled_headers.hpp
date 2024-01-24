@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 #include <string>
 #include <chrono>
 #include <stack>
@@ -42,6 +43,7 @@
 #include <boost/log/trivial.hpp>
 #include <boost/log/utility/setup.hpp>
 #include <boost/log/utility/manipulators/add_value.hpp>
+#include <bit7z/bitarchivereader.hpp>
 
 #include <config.hpp>
 #include <logging/logger.hpp>

@@ -2,10 +2,9 @@
 
 http_session::http_session(tcp::socket&& socket, ssl::context& ssl_context)
     :
-    _stream(std::move(socket), ssl_context), 
+    _stream(std::move(socket), ssl_context),
     _request_params
     {
-        .user_ip = beast::get_lowest_layer(_stream).socket().remote_endpoint().address().to_string(),
         .body = _request_parser->get().body()
     },
     _response_params
@@ -15,15 +14,78 @@ http_session::http_session(tcp::socket&& socket, ssl::context& ssl_context)
 {
     _response.keep_alive(true);
     _response.version(11);
-    _response.set(http::field::server, "OCSearch");
-    _response.set(
-        http::field::host, 
-        config::SERVER_IP_ADDRESS + ":" + std::to_string(config::SERVER_PORT));
     _response.set(http::field::access_control_allow_credentials, "true");
     _response.set(http::field::access_control_allow_origin, config::DOMAIN_NAME);
     _response.set(http::field::access_control_allow_methods, "OPTIONS, GET, POST, PUT, PATCH, DELETE");
     _response.set(http::field::access_control_allow_headers, "Content-Type, Authorization");
 }
+
+const std::unordered_map<
+    std::tuple<std::string_view, http::verb, uri_params::type>, 
+    std::tuple<bool, jwt_token_type, const request_handler_t>, 
+    boost::hash<std::tuple<std::string_view, http::verb, uri_params::type>>> http_session::_requests_metadata
+{
+    {
+        {"/api/user/login", http::verb::post, uri_params::type::no},
+        {true, jwt_token_type::no, request_handlers::user::login}
+    },
+    {
+        {"/api/user/logout", http::verb::post, uri_params::type::no},
+        {false, jwt_token_type::refresh_token, request_handlers::user::logout}
+    },
+    {
+        {"/api/user/tokens", http::verb::put, uri_params::type::no},
+        {false, jwt_token_type::refresh_token, request_handlers::user::refresh_tokens}
+    },
+    {
+        {"/api/user/sessions", http::verb::get, uri_params::type::no},
+        {false, jwt_token_type::refresh_token, request_handlers::user::get_sessions_info}
+    },
+    {
+        {"/api/user/sessions", http::verb::delete_, uri_params::type::path},
+        {false, jwt_token_type::access_token, request_handlers::user::close_session}
+    },
+    {
+        {"/api/user/sessions", http::verb::delete_, uri_params::type::no},
+        {false, jwt_token_type::refresh_token, request_handlers::user::close_all_sessions_except_current}
+    },
+    {
+        {"/api/user/password", http::verb::put, uri_params::type::no},
+        {true, jwt_token_type::refresh_token, request_handlers::user::change_password}
+    },
+    {
+        {"/api/file_system/folders", http::verb::get, uri_params::type::no},
+        {false, jwt_token_type::access_token, request_handlers::file_system::get_folders_info}
+    },
+    {
+        {"/api/file_system/folders", http::verb::post, uri_params::type::no},
+        {true, jwt_token_type::access_token, request_handlers::file_system::create_folder}
+    },
+    {
+        {"/api/file_system/folders", http::verb::delete_, uri_params::type::query},
+        {false, jwt_token_type::access_token, request_handlers::file_system::delete_folders}
+    },
+    {
+        {"/api/file_system/folders", http::verb::patch, uri_params::type::path},
+        {true, jwt_token_type::access_token, request_handlers::file_system::rename_folder}
+    },
+    {
+        {"/api/file_system/files", http::verb::get, uri_params::type::query},
+        {false, jwt_token_type::access_token, request_handlers::file_system::get_files_info}
+    },
+    {
+        {"/api/file_system/files", http::verb::post, uri_params::type::query},
+        {true, jwt_token_type::access_token, [](const request_params&, response_params&){}}
+    },
+    {
+        {"/api/file_system/files", http::verb::delete_, uri_params::type::query},
+        {false, jwt_token_type::access_token, request_handlers::file_system::delete_files}
+    },
+    {
+        {"/api/file_system/files", http::verb::patch, uri_params::type::path},
+        {true, jwt_token_type::access_token, request_handlers::file_system::rename_file}
+    }
+};
 
 void http_session::run()
 {
@@ -51,22 +113,16 @@ void http_session::on_run()
 
 void http_session::on_handshake(beast::error_code error_code)
 {
-    // The errors mean that client closed the connection 
-    if(error_code == http::error::end_of_stream || error_code == asio::ssl::error::stream_truncated)
-    {
-        return do_close();
-    }
-
     // The error means that the timer on the logical operation(write/read) is expired
     if (error_code == beast::error::timeout)
     {
-        return do_close();
+        return;
     }
 
+    // The error means that client can't make correct ssl handshake or just send random data packets
     if (error_code)
     {
-        LOG_ERROR << error_code.message();
-        return;
+        return do_close();
     }
 
     set_request_props();
@@ -79,7 +135,7 @@ void http_session::set_request_props()
     // otherwise the operation behavior is undefined
     _request_parser.emplace();
 
-    // Erase previous set cookie field values
+    // Erase previous Set-Cookie field values
     _response.erase(http::field::set_cookie);
     // Clear previous body data
     _response.body().clear();
@@ -88,10 +144,11 @@ void http_session::set_request_props()
     _response_params.init_params();
     
     // Set unlimited body to prevent "body limit exceeded" error
-    // and handle the real limit in validate_request_attributes 
+    // and handle the real limit in validate_request_attributes as it has to be processed differently
+    // depending on if the request is for uploading files or not
     _request_parser->body_limit(boost::none);
 
-    // Fix the error "bad method" that happens if read only the header when there is a body in request
+    // Clear the buffer for each request
     _buffer.clear();
 }
 
@@ -113,7 +170,7 @@ void http_session::on_read_header(beast::error_code error_code, std::size_t byte
     boost::ignore_unused(bytes_transferred);
 
     // The errors mean that client closed the connection 
-    if(error_code == http::error::end_of_stream || error_code == asio::ssl::error::stream_truncated)
+    if (error_code == http::error::end_of_stream || error_code == asio::ssl::error::stream_truncated)
     {
         return do_close();
     }
@@ -121,19 +178,22 @@ void http_session::on_read_header(beast::error_code error_code, std::size_t byte
     // The error means that the timer on the logical operation(write/read) is expired
     if (error_code == beast::error::timeout)
     {
-        return do_close();
+        return;
     }
 
+    // Request has invalid header structure so it can't be processed
     if (error_code)
     {
-        LOG_ERROR << error_code.message();
-        return do_close();
+        prepare_error_response(
+            http::status::bad_request, 
+            "Invalid request");
+        return do_write_response(false);
     }   
 
     // Reset the timeout
     beast::get_lowest_layer(_stream).expires_never();
 
-    // Process OPTIONS method separately: 
+    // Process OPTIONS method separately as it is necessary for correct browser CORS policy work
     if (_request_parser->get().method() == http::verb::options)
     {
         parse_response_params();
@@ -141,8 +201,8 @@ void http_session::on_read_header(beast::error_code error_code, std::size_t byte
         return do_write_response(true);
     }
 
-    // Determine the handler to invoke by request target 
-    // or construct error response if didn't found corresponding target
+    // Determine the handler to invoke by request metadata
+    // or construct error response if didn't found corresponding request
     if (auto request_metadata = _requests_metadata.find(
         {
             uri_params::get_unparameterized_uri(_request_parser->get().target()), 
@@ -151,8 +211,14 @@ void http_session::on_read_header(beast::error_code error_code, std::size_t byte
         }); 
         request_metadata != _requests_metadata.end())
     {
+        // Determine if the request is for uploading files as it has to be processed separately
+        bool is_uploading_files_request = 
+            request_metadata->first == 
+                std::tuple<std::string_view, http::verb, uri_params::type>{
+                    "/api/file_system/files", http::verb::post, uri_params::type::query};
+
         // Check if the request attributes meets the requirements depending on the expected body presence
-        if (!validate_request_attributes(std::get<0>(request_metadata->second)))
+        if (!validate_request_attributes(std::get<0>(request_metadata->second), is_uploading_files_request))
         {
             return do_write_response(false);
         }
@@ -169,23 +235,23 @@ void http_session::on_read_header(beast::error_code error_code, std::size_t byte
         // Read the body with the presence and invoke request handler
         if (std::get<0>(request_metadata->second))
         {
-            // Process downloading files separately because it is not synchronous as other handlers 
-            if (request_metadata->first == 
-                std::tuple<std::string_view, http::verb, uri_params::type>{
-                    "/api/file_system/files", http::verb::post, uri_params::type::QUERY})
+            // Process uploading files separately because it is not synchronous as other handlers 
+            if (is_uploading_files_request)
             {
-                return download_files();
+                return upload_files();
             }
+
             do_read_body(std::get<2>(request_metadata->second));
         }
         else
         {
+            // Invoke request handler to process corresponding request logic
             std::get<2>(request_metadata->second)(_request_params, _response_params);
 
             // Parse reponse params to set all of the necessary fields in the _response
             parse_response_params();
 
-            do_write_response();
+            do_write_response(true);
         }
     }
     else
@@ -220,7 +286,7 @@ void http_session::on_read_body(
     boost::ignore_unused(bytes_transferred);
 
     // The error means that client closed the connection
-    if(error_code == http::error::end_of_stream || error_code == asio::ssl::error::stream_truncated)
+    if (error_code == http::error::end_of_stream || error_code == asio::ssl::error::stream_truncated)
     {
         return do_close();
     }
@@ -228,15 +294,18 @@ void http_session::on_read_body(
     // The error means that the timer on the logical operation(write/read) is expired
     if (error_code == beast::error::timeout)
     {
-        return do_close();
+        return;
     }
 
+    // Request has invalid body structure so it can't be processed
     if (error_code)
     {
-        LOG_ERROR << error_code.message();
-        return do_close();
+        prepare_error_response(
+            http::status::bad_request, 
+            "Invalid request");
+        return do_write_response(false);
     }   
-
+    
     // Reset the timeout as we may do long request handling 
     beast::get_lowest_layer(_stream).expires_never();
 
@@ -246,7 +315,7 @@ void http_session::on_read_body(
     // Parse reponse params to set all of the necessary fields in the _response
     parse_response_params();
 
-    do_write_response();
+    do_write_response(true);
 }
 
 void http_session::do_write_response(bool keep_alive)
@@ -272,17 +341,16 @@ void http_session::on_write_response(bool keep_alive, beast::error_code error_co
     // The error means that the timer on the logical operation(write/read) is expired
     if (error_code == beast::error::timeout)
     {
-        return do_close();
+        return;
     }
 
     if (error_code)
     {
-        LOG_ERROR << error_code.message();
         return do_close();
     }
 
-    // Determine whether we have to read the next request or close the connection
-    // depending on whether the response was regular or error
+    // Determine either we have to read the next request or close the connection
+    // depending on either the response was regular or error
     if (keep_alive)
     {
         set_request_props();    
@@ -303,10 +371,14 @@ void http_session::do_close()
     _stream.async_shutdown([self = shared_from_this()](beast::error_code){});
 }
 
-void http_session::prepare_error_response(const http::status response_status, std::string_view error_message)
+void http_session::prepare_error_response(http::status response_status, std::string_view error_message)
 {
     _response.result(response_status);
-    _response.body().assign(R"({"error":")").append(error_message).append(R"("})");
+    _response.body() = json::serialize(
+        json::object
+        {
+            {"error", error_message}
+        });
     _response.prepare_payload();
 }
 
@@ -314,6 +386,7 @@ void http_session::parse_request_params()
 {
     _request_params.uri = _request_parser->get().target();
     _request_params.user_agent = _request_parser->get()[http::field::user_agent];
+    _request_params.user_ip = _request_parser->get()["X-Forwarded-For"];
 
     // Get access token from the Authorization field in the http header in the format of "Bearer <token>"
     // so access token are less than the length 8 can't be at all(don't try to predict access token length) 
@@ -368,21 +441,21 @@ void http_session::parse_response_params()
     _response.prepare_payload();
 }
 
-bool http_session::validate_request_attributes(bool has_body)
+bool http_session::validate_request_attributes(bool has_body, bool is_uploading_files_request)
 {
     // Request with body
     if (has_body)
     {
-        // We expect body octets but there are no
+        // We expect body but there is no
         if (_request_parser->is_done())
         {
             prepare_error_response(
                 http::status::unprocessable_entity, 
-                "Body octets were expected");
+                "Body was expected");
             return false;
         }
         
-        // Content-Length absence causes difficult debugging of the body errors
+        // Content-Length is necessary to properly parse the body
         if (!_request_parser->content_length())
         {
             prepare_error_response(
@@ -391,46 +464,28 @@ bool http_session::validate_request_attributes(bool has_body)
             return false;
         }
 
-        // // Forbid requests with body size more than 1 MB(there is exception for uploading files)
-        // if (*_request_parser->content_length() > 1024 * 1024)
-        // {
-        //     prepare_error_response(
-        //         http::status::payload_too_large, 
-        //         "Too large body size");
-        //     return false;
-        // }
+        // Forbid requests with body size more than 1 MB if it is not for uploading files
+        if (!is_uploading_files_request && *_request_parser->content_length() > 1024 * 1024)
+        {
+            prepare_error_response(
+                http::status::payload_too_large, 
+                "Too large body size");
+            return false;
+        }
 
         return true;
     }
     // Request with no body
     else
     {
-        // We don't expect body octets but they are there
+        // We don't expect body but they is there
         if (!_request_parser->is_done())
         {
             prepare_error_response(
                 http::status::unprocessable_entity, 
-                "No body octets were expected");
+                "No body was expected");
             return false;
         }
-
-        // Content-Length absence causes difficult debugging of the body errors 
-        // if (!_request_parser->content_length())
-        // {
-        //     prepare_error_response(
-        //         http::status::length_required, 
-        //         "No Content-Length field");
-        //     return false;
-        // }
-
-        // // Request without body is expected Content-Length to be zero
-        // if (*_request_parser->content_length() != 0)
-        // {
-        //     prepare_error_response(
-        //         http::status::length_required, 
-        //         "Content-Length field was expected to be zero");
-        //     return false;
-        // }
 
         return true;
     }
@@ -440,12 +495,12 @@ bool http_session::validate_jwt_token(jwt_token_type token_type)
 {
     switch (token_type)
     {
-        case (jwt_token_type::NO):
+        case (jwt_token_type::no):
         {
             return true;
         }
 
-        case (jwt_token_type::ACCESS_TOKEN):
+        case (jwt_token_type::access_token):
         {
             if (!jwt_utils::is_token_valid(std::string{_request_params.access_token}))
             {
@@ -456,7 +511,7 @@ bool http_session::validate_jwt_token(jwt_token_type token_type)
             return true;
         }
 
-        case (jwt_token_type::REFRESH_TOKEN):
+        case (jwt_token_type::refresh_token):
         {
             if (!jwt_utils::is_token_valid(std::string{_request_params.refresh_token}))
             {
@@ -474,7 +529,7 @@ bool http_session::validate_jwt_token(jwt_token_type token_type)
     }
 }
 
-void http_session::download_files()
+void http_session::upload_files()
 {
     size_t folder_id;
 
@@ -497,10 +552,10 @@ void http_session::download_files()
         return do_write_response(false);
     }
 
-    std::optional<std::string> folder_path_opt = db_conn->get_folder_path(folder_id);
+    std::optional<bool> does_folder_exist_opt = db_conn->check_folder_existence_by_id(folder_id);
     
     // An error occured with database connection
-    if (!folder_path_opt.has_value())
+    if (!does_folder_exist_opt.has_value())
     {
         prepare_error_response(
             http::status::internal_server_error, 
@@ -509,7 +564,7 @@ void http_session::download_files()
     }
 
     // Folder with folder_id doesn't exist
-    if (folder_path_opt.value() == "")
+    if (!does_folder_exist_opt.value())
     {
         prepare_error_response(
             http::status::unprocessable_entity, 
@@ -521,9 +576,9 @@ void http_session::download_files()
     // could be previously obtained while reading the header
     _files_string_buffer.assign(asio::buffer_cast<const char*>(_buffer.data()), _buffer.size());
 
-    // Use special wrapper for string as buffer for downloading files
+    // Use special wrapper for string as buffer for uploading files
     // Main buffer of type beast::flat_buffer is incompatible here(works weird)
-    // Set the maximum size of the downloading packet to 10 MB
+    // Set the maximum size of the uploading packet to 10 MB
     dynamic_buffer buffer{_files_string_buffer, 1024 * 1024 * 10};
 
     std::string_view content_type = _request_parser->get()[http::field::content_type];
@@ -544,8 +599,22 @@ void http_session::download_files()
     // Declare file variable to write obtained data to the corresponding files 
     std::ofstream file;
 
-    // Store the ids and paths for all downloaded files to process them afterward(e.g. to recode or unzip for archives)
+    // Store the ids and paths for all uploaded files to process them afterward(e.g. to recode or unzip for archives)
     std::list<std::pair<size_t, std::string>> file_ids_and_paths;
+
+    size_t user_id;
+
+    // This error means that access token was somehow generated incorrectly
+    if (!jwt_utils::get_token_claim(
+        std::string{_request_params.access_token}, 
+        "userId", 
+        user_id))
+    {
+        prepare_error_response(
+            http::status::unauthorized, 
+            "Invalid access token");
+        return do_write_response(false);
+    }
 
     // Set the timeout
     beast::get_lowest_layer(_stream).expires_after(std::chrono::seconds(30));
@@ -556,8 +625,8 @@ void http_session::download_files()
             [this, self = shared_from_this()](
                 dynamic_buffer&& buffer, 
                 std::string_view&& boundary,
+                size_t user_id,
                 size_t folder_id,
-                std::string&& folder_path, 
                 std::ofstream&& file, 
                 database_connection_wrapper&& db_conn,
                 std::list<std::pair<size_t, std::string>>&& file_ids_and_paths,
@@ -578,31 +647,30 @@ void http_session::download_files()
                 // that represents the delimeter between file header and data itself
                 asio::async_read_until(_stream, buffer, "\r\n\r\n", 
                     beast::bind_front_handler( 
-                        &http_session::handle_file_header, 
+                        &http_session::process_uploading_file_header, 
                         shared_from_this(), 
                         std::move(buffer), 
                         std::move(boundary), 
+                        user_id,
                         folder_id, 
-                        std::move(folder_path), 
                         std::move(file),
                         std::move(db_conn),
                         std::move(file_ids_and_paths)));
             }, 
             std::move(buffer), 
             std::move(boundary), 
+            user_id,
             folder_id, 
-            std::move(folder_path_opt.value()), 
             std::move(file),
             std::move(db_conn),
             std::move(file_ids_and_paths)));
-    
 }
 
-void http_session::handle_file_header(
+void http_session::process_uploading_file_header(
     dynamic_buffer&& buffer, 
     std::string_view&& boundary,
+    size_t user_id,
     size_t folder_id,
-    std::string&& folder_path, 
     std::ofstream&& file,
     database_connection_wrapper&& db_conn, 
     std::list<std::pair<size_t, std::string>>&& file_ids_and_paths,
@@ -610,12 +678,14 @@ void http_session::handle_file_header(
 {
     if (error_code)
     {
-        // If there are downloaded files then start separately processing them and close the connection
+        // If there are uploaded files then start separately processing them and close the connection
         if (!file_ids_and_paths.empty())
         {
             std::thread{
-                request_handlers::process_downloaded_files, 
+                request_handlers::file_system::process_uploaded_files,
                 std::move(file_ids_and_paths), 
+                user_id,
+                folder_id, 
                 std::move(db_conn)}.detach();
         }
 
@@ -634,12 +704,14 @@ void http_session::handle_file_header(
     // filename field is absent
     if (file_name_position == std::string::npos)
     {
-        // If there are downloaded files then start separately processing them and return response
+        // If there are uploaded files then start separately processing them and return response
         if (!file_ids_and_paths.empty())
         {
             std::thread{
-                request_handlers::process_downloaded_files, 
+                request_handlers::file_system::process_uploaded_files,
                 std::move(file_ids_and_paths), 
+                user_id,
+                folder_id, 
                 std::move(db_conn)}.detach();
         }
 
@@ -652,49 +724,23 @@ void http_session::handle_file_header(
     // Shift to the filename itself(e.g. filename="file.txt")
     file_name_position += 10;
 
-    size_t user_id;
-
-    // This error means that access token was somehow generated incorrectly
-    if (!jwt_utils::get_token_claim(
-        std::string{_request_params.access_token}, 
-        "userId", 
-        user_id))
-    {
-        // If there are downloaded files then start separately processing them and return response
-        if (!file_ids_and_paths.empty())
-        {
-            std::thread{
-                request_handlers::process_downloaded_files, 
-                std::move(file_ids_and_paths), 
-                std::move(db_conn)}.detach();
-        }
-
-        prepare_error_response(
-            http::status::unauthorized, 
-            "Invalid access token");
-        return do_write_response(false);
-    }
-
     std::string file_name = std::string{string_buffer.substr(
         file_name_position, string_buffer.find('"', file_name_position) - file_name_position)};
     file_name_position = file_name.find_last_of('.');
     std::string file_extension = file_name.substr(file_name_position + 1);
     file_name = file_name.substr(0, file_name_position);
 
-    static const std::unordered_set<std::string> allowed_file_extensions
-    {
-        "csv", "txt", "zip", "sql", "xlsx", "xls"
-    };
-
     // Invalid file extension
-    if (!allowed_file_extensions.contains(file_extension))
+    if (!config::ALLOWED_UPLOADING_FILE_EXTENSIONS.contains(file_extension))
     {
-        // If there are downloaded files then start separately processing them and return response
+        // If there are uploaded files then start separately processing them and return response
         if (!file_ids_and_paths.empty())
         {
             std::thread{
-                request_handlers::process_downloaded_files, 
+                request_handlers::file_system::process_uploaded_files,
                 std::move(file_ids_and_paths), 
+                user_id,
+                folder_id, 
                 std::move(db_conn)}.detach();
         }
 
@@ -739,13 +785,15 @@ void http_session::handle_file_header(
 
         if (!does_file_exist_opt.has_value())
         {
-            // If there are downloaded files then start separately processing them and return response
+            // If there are uploaded files then start separately processing them and return response
             if (!file_ids_and_paths.empty())
             {
                 std::thread{
-                request_handlers::process_downloaded_files, 
-                std::move(file_ids_and_paths), 
-                std::move(db_conn)}.detach();
+                    request_handlers::file_system::process_uploaded_files,
+                    std::move(file_ids_and_paths), 
+                    user_id,
+                    folder_id, 
+                    std::move(db_conn)}.detach();
             }
             
             prepare_error_response(
@@ -796,22 +844,23 @@ void http_session::handle_file_header(
         }       
     }
 
-    std::optional<std::pair<size_t, std::string>> file_id_and_path_opt = db_conn->insert_file(
+    std::optional<std::pair<size_t, std::string>> file_id_and_path_opt = db_conn->insert_uploading_file(
         user_id,
         folder_id,
-        folder_path,
         file_name,
         file_extension);
 
     // An error occured with database connection
     if (!file_id_and_path_opt.has_value())
     {
-        // If there are downloaded files then start separately processing them and return response
+        // If there are uploaded files then start separately processing them and return response
         if (!file_ids_and_paths.empty())
         {
             std::thread{
-                request_handlers::process_downloaded_files, 
+                request_handlers::file_system::process_uploaded_files,
                 std::move(file_ids_and_paths), 
+                user_id,
+                folder_id, 
                 std::move(db_conn)}.detach();
         }
         
@@ -824,7 +873,7 @@ void http_session::handle_file_header(
     // Create and open the file to write the obtaining data
     file.open(file_id_and_path_opt->second, std::ios::binary);
 
-    // Store id and path of the current file to process it after the download(e.g. to recode or unzip for archives)
+    // Store id and path of the current file to process it after the upload(e.g. to recode or unzip for archives)
     file_ids_and_paths.emplace_back(file_id_and_path_opt.value());
 
     // Consume the file header bytes 
@@ -836,22 +885,22 @@ void http_session::handle_file_header(
     // Read the file data obtaining bytes until the boundary that represents the end of file
     asio::async_read_until(_stream, buffer, boundary, 
         beast::bind_front_handler( 
-            &http_session::handle_file_data, 
+            &http_session::process_uploading_file_data, 
             shared_from_this(), 
             std::move(buffer), 
             std::move(boundary), 
+            user_id,
             folder_id, 
-            std::move(folder_path), 
             std::move(file),
             std::move(db_conn),
             std::move(file_ids_and_paths)));
 }
 
-void http_session::handle_file_data(
+void http_session::process_uploading_file_data(
     dynamic_buffer&& buffer, 
     std::string_view&& boundary,
+    size_t user_id,
     size_t folder_id,
-    std::string&& folder_path, 
     std::ofstream&& file,
     database_connection_wrapper&& db_conn, 
     std::list<std::pair<size_t, std::string>>&& file_ids_and_paths,
@@ -875,12 +924,12 @@ void http_session::handle_file_data(
         // Read the next data until either we find a boundary or read the packet of maximum size again 
         asio::async_read_until(_stream, buffer, boundary, 
             beast::bind_front_handler( 
-                &http_session::handle_file_data, 
+                &http_session::process_uploading_file_data, 
                 shared_from_this(), 
                 std::move(buffer), 
                 std::move(boundary), 
+                user_id,
                 folder_id, 
-                std::move(folder_path), 
                 std::move(file),
                 std::move(db_conn),
                 std::move(file_ids_and_paths)));
@@ -904,20 +953,22 @@ void http_session::handle_file_data(
         // Delete the file from the database
         db_conn->delete_file(file_ids_and_paths.back().first);
 
-        // Remove the file from the list of downloaded files 
+        // Remove the file from the list of uploaded files 
         file_ids_and_paths.pop_back();
 
-        // If there are downloaded files then start separately processing them and return response
+        // If there are uploaded files then start separately processing them and return response
         if (!file_ids_and_paths.empty())
         {
             std::thread{
-                request_handlers::process_downloaded_files, 
+                request_handlers::file_system::process_uploaded_files,
                 std::move(file_ids_and_paths), 
+                user_id,
+                folder_id, 
                 std::move(db_conn)}.detach();
         }
     };
 
-    // Unexpected error occured so clean up everything about not downloaded file
+    // Unexpected error occured so clean up everything about not uploaded file
     if (error_code)
     {
         file.close();
@@ -935,7 +986,7 @@ void http_session::handle_file_data(
    // boudary variable doesn't contain it
     file.write(asio::buffer_cast<const char*>(buffer.data()), bytes_transferred - boundary.size() - 4);
 
-    // Close the file as its downloading is over
+    // Close the file as its uploading is over
     file.close();
 
     // Consume obtained bytes
@@ -943,7 +994,7 @@ void http_session::handle_file_data(
 
     size_t file_size;
 
-    // Determine the file size of just downloaded file
+    // Determine the file size of just uploaded file
     try
     {
         file_size = std::filesystem::file_size(file_ids_and_paths.back().second);
@@ -960,7 +1011,7 @@ void http_session::handle_file_data(
         return do_write_response(false);
     }
 
-    // Update the data about just downloaded file
+    // Update the data about just uploaded file
     if (!db_conn->update_uploaded_file(file_ids_and_paths.back().first, file_size).has_value())
     {
         process_file_cleanup();
@@ -972,13 +1023,15 @@ void http_session::handle_file_data(
     }
 
     // If there is "--" after the boundary then there are no more files and request body is over
-    // So start processing downloaded files and send response
+    // So start processing uploaded files and send response
     if (std::string_view{asio::buffer_cast<const char*>(buffer.data()), buffer.size()} == "--\r\n")
     {
         std::thread{
-                request_handlers::process_downloaded_files, 
-                std::move(file_ids_and_paths), 
-                std::move(db_conn)}.detach();
+            request_handlers::file_system::process_uploaded_files,
+            std::move(file_ids_and_paths), 
+            user_id,
+            folder_id, 
+            std::move(db_conn)}.detach();
 
         _response.result(http::status::ok);
         _response.prepare_payload();
@@ -992,12 +1045,12 @@ void http_session::handle_file_data(
     // Read the next file header
     asio::async_read_until(_stream, buffer, "\r\n\r\n", 
         beast::bind_front_handler( 
-            &http_session::handle_file_header, 
+            &http_session::process_uploading_file_header, 
             shared_from_this(), 
             std::move(buffer), 
             std::move(boundary), 
+            user_id,
             folder_id, 
-            std::move(folder_path), 
             std::move(file),
             std::move(db_conn),
             std::move(file_ids_and_paths)));

@@ -1,4 +1,4 @@
-#include <validation/normalization.hpp>
+#include <parsing/validation/normalization.hpp>
 
 inline const std::unordered_map<validation, std::function<void(std::string&)>> normalizer::_validation_to_normalizer
 {

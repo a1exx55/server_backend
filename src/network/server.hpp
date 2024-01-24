@@ -31,7 +31,7 @@ namespace server
 
             // Initialize pool of database connections
             database_connections_pool::init(
-                config::DATABASES_NUMBER,
+                config::DATABASE_CONNNECTIONS_NUMBER,
                 config::DATABASE_USERNAME,
                 config::DATABASE_PASSWORD,
                 "127.0.0.1",

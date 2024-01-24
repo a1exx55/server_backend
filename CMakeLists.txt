@@ -28,12 +28,13 @@ set(SRC
 	src/network/listener.cpp
 	src/network/http_session.cpp
 	src/network/uri_params.cpp
-	src/request_handlers/request_handlers.cpp
 	src/jwt_utils/jwt_utils.cpp
 	src/cookie_utils/cookie_utils.cpp
-	# src/validation/validation.cpp
-	# src/validation/normalization.cpp
-	# src/parsing/patterns_storage.cpp
+	# src/request_handlers/request_handlers.cpp
+	src/request_handlers/user/user_request_handlers.cpp
+	src/request_handlers/file_system/file_system_request_handlers.cpp
+	# src/parsing/validation/validation.cpp
+	# src/parsing/validation/normalization.cpp
 	)
 
 add_executable(${PROJECT_NAME} ${SRC})
@@ -43,6 +44,7 @@ target_precompile_headers(${PROJECT_NAME} PRIVATE precompiled_headers.hpp)
 #link external libs
 target_link_libraries(${PROJECT_NAME} 
 	-lpqxx -lpq
+	-lbit7z64
 	ICU::uc ICU::i18n
 	Boost::regex 
 	Boost::json 
