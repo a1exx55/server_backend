@@ -16,8 +16,6 @@ find_package(Boost COMPONENTS REQUIRED
 	log)
 
 find_package(OpenSSL REQUIRED)
-
-include_directories("include/" "src/")
  
 #include all source files
 set(SRC 
@@ -33,11 +31,15 @@ set(SRC
 	# src/request_handlers/request_handlers.cpp
 	src/request_handlers/user/user_request_handlers.cpp
 	src/request_handlers/file_system/file_system_request_handlers.cpp
+	src/parsing/file_types_conversion/file_types_conversion.cpp
+	src/parsing/file_preview/file_preview.cpp
 	# src/parsing/validation/validation.cpp
 	# src/parsing/validation/normalization.cpp
 	)
 
 add_executable(${PROJECT_NAME} ${SRC})
+
+target_include_directories(${PROJECT_NAME} PRIVATE "include/" "src/")
 
 target_precompile_headers(${PROJECT_NAME} PRIVATE precompiled_headers.hpp)
 

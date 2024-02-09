@@ -74,6 +74,14 @@ const std::unordered_map<
         {false, jwt_token_type::access_token, request_handlers::file_system::get_files_info}
     },
     {
+        {"/api/file_system/file_rows_number", http::verb::get, uri_params::type::path},
+        {false, jwt_token_type::access_token, request_handlers::file_system::get_file_rows_number}
+    },
+    {
+        {"/api/file_system/files", http::verb::get, uri_params::type::path_and_query},
+        {false, jwt_token_type::access_token, request_handlers::file_system::get_file_raw_rows}
+    },
+    {
         {"/api/file_system/files", http::verb::post, uri_params::type::query},
         {true, jwt_token_type::access_token, [](const request_params&, response_params&){}}
     },
@@ -600,7 +608,7 @@ void http_session::upload_files()
     std::ofstream file;
 
     // Store the ids and paths for all uploaded files to process them afterward(e.g. to recode or unzip for archives)
-    std::list<std::pair<size_t, std::string>> file_ids_and_paths;
+    std::list<std::tuple<size_t, std::filesystem::path, std::string>> files_data;
 
     size_t user_id;
 
@@ -629,7 +637,7 @@ void http_session::upload_files()
                 size_t folder_id,
                 std::ofstream&& file, 
                 database_connection_wrapper&& db_conn,
-                std::list<std::pair<size_t, std::string>>&& file_ids_and_paths,
+                std::list<std::tuple<size_t, std::filesystem::path, std::string>>&& files_data,
                 beast::error_code error_code, std::size_t bytes_transferred)
             {
                 if (error_code)
@@ -655,7 +663,7 @@ void http_session::upload_files()
                         folder_id, 
                         std::move(file),
                         std::move(db_conn),
-                        std::move(file_ids_and_paths)));
+                        std::move(files_data)));
             }, 
             std::move(buffer), 
             std::move(boundary), 
@@ -663,7 +671,7 @@ void http_session::upload_files()
             folder_id, 
             std::move(file),
             std::move(db_conn),
-            std::move(file_ids_and_paths)));
+            std::move(files_data)));
 }
 
 void http_session::process_uploading_file_header(
@@ -673,17 +681,17 @@ void http_session::process_uploading_file_header(
     size_t folder_id,
     std::ofstream&& file,
     database_connection_wrapper&& db_conn, 
-    std::list<std::pair<size_t, std::string>>&& file_ids_and_paths,
+    std::list<std::tuple<size_t, std::filesystem::path, std::string>>&& files_data,
     beast::error_code error_code, std::size_t bytes_transferred)
 {
     if (error_code)
     {
         // If there are uploaded files then start separately processing them and close the connection
-        if (!file_ids_and_paths.empty())
+        if (!files_data.empty())
         {
             std::thread{
                 request_handlers::file_system::process_uploaded_files,
-                std::move(file_ids_and_paths), 
+                std::move(files_data), 
                 user_id,
                 folder_id, 
                 std::move(db_conn)}.detach();
@@ -705,11 +713,11 @@ void http_session::process_uploading_file_header(
     if (file_name_position == std::string::npos)
     {
         // If there are uploaded files then start separately processing them and return response
-        if (!file_ids_and_paths.empty())
+        if (!files_data.empty())
         {
             std::thread{
                 request_handlers::file_system::process_uploaded_files,
-                std::move(file_ids_and_paths), 
+                std::move(files_data), 
                 user_id,
                 folder_id, 
                 std::move(db_conn)}.detach();
@@ -734,11 +742,11 @@ void http_session::process_uploading_file_header(
     if (!config::ALLOWED_UPLOADING_FILE_EXTENSIONS.contains(file_extension))
     {
         // If there are uploaded files then start separately processing them and return response
-        if (!file_ids_and_paths.empty())
+        if (!files_data.empty())
         {
             std::thread{
                 request_handlers::file_system::process_uploaded_files,
-                std::move(file_ids_and_paths), 
+                std::move(files_data), 
                 user_id,
                 folder_id, 
                 std::move(db_conn)}.detach();
@@ -786,11 +794,11 @@ void http_session::process_uploading_file_header(
         if (!does_file_exist_opt.has_value())
         {
             // If there are uploaded files then start separately processing them and return response
-            if (!file_ids_and_paths.empty())
+            if (!files_data.empty())
             {
                 std::thread{
                     request_handlers::file_system::process_uploaded_files,
-                    std::move(file_ids_and_paths), 
+                    std::move(files_data), 
                     user_id,
                     folder_id, 
                     std::move(db_conn)}.detach();
@@ -844,21 +852,18 @@ void http_session::process_uploading_file_header(
         }       
     }
 
-    std::optional<std::pair<size_t, std::string>> file_id_and_path_opt = db_conn->insert_uploading_file(
-        user_id,
-        folder_id,
-        file_name,
-        file_extension);
+    std::optional<std::tuple<size_t, std::filesystem::path, std::string>> file_data_opt = 
+        db_conn->insert_uploading_file(user_id, folder_id, file_name, file_extension);
 
     // An error occured with database connection
-    if (!file_id_and_path_opt.has_value())
+    if (!file_data_opt.has_value())
     {
         // If there are uploaded files then start separately processing them and return response
-        if (!file_ids_and_paths.empty())
+        if (!files_data.empty())
         {
             std::thread{
                 request_handlers::file_system::process_uploaded_files,
-                std::move(file_ids_and_paths), 
+                std::move(files_data), 
                 user_id,
                 folder_id, 
                 std::move(db_conn)}.detach();
@@ -871,10 +876,10 @@ void http_session::process_uploading_file_header(
     }
 
     // Create and open the file to write the obtaining data
-    file.open(file_id_and_path_opt->second, std::ios::binary);
+    file.open(std::get<1>(file_data_opt.value()).string(), std::ios::binary);
 
     // Store id and path of the current file to process it after the upload(e.g. to recode or unzip for archives)
-    file_ids_and_paths.emplace_back(file_id_and_path_opt.value());
+    files_data.emplace_back(file_data_opt.value());
 
     // Consume the file header bytes 
     buffer.consume(bytes_transferred);
@@ -893,7 +898,7 @@ void http_session::process_uploading_file_header(
             folder_id, 
             std::move(file),
             std::move(db_conn),
-            std::move(file_ids_and_paths)));
+            std::move(files_data)));
 }
 
 void http_session::process_uploading_file_data(
@@ -903,7 +908,7 @@ void http_session::process_uploading_file_data(
     size_t folder_id,
     std::ofstream&& file,
     database_connection_wrapper&& db_conn, 
-    std::list<std::pair<size_t, std::string>>&& file_ids_and_paths,
+    std::list<std::tuple<size_t, std::filesystem::path, std::string>>&& files_data,
     beast::error_code error_code, std::size_t bytes_transferred)
 {
     // File can't be read at once as it is too big(>10Mb)
@@ -932,7 +937,7 @@ void http_session::process_uploading_file_data(
                 folder_id, 
                 std::move(file),
                 std::move(db_conn),
-                std::move(file_ids_and_paths)));
+                std::move(files_data)));
         return;
     }
 
@@ -943,7 +948,7 @@ void http_session::process_uploading_file_data(
         // Remove the file from the file system
         try
         {
-            std::filesystem::remove(file_ids_and_paths.back().second);
+            std::filesystem::remove(std::get<1>(files_data.back()));
         }
         catch (const std::exception& ex)
         {
@@ -951,17 +956,17 @@ void http_session::process_uploading_file_data(
         }
 
         // Delete the file from the database
-        db_conn->delete_file(file_ids_and_paths.back().first);
+        db_conn->delete_file(std::get<0>(files_data.back()));
 
         // Remove the file from the list of uploaded files 
-        file_ids_and_paths.pop_back();
+        files_data.pop_back();
 
         // If there are uploaded files then start separately processing them and return response
-        if (!file_ids_and_paths.empty())
+        if (!files_data.empty())
         {
             std::thread{
                 request_handlers::file_system::process_uploaded_files,
-                std::move(file_ids_and_paths), 
+                std::move(files_data), 
                 user_id,
                 folder_id, 
                 std::move(db_conn)}.detach();
@@ -997,7 +1002,7 @@ void http_session::process_uploading_file_data(
     // Determine the file size of just uploaded file
     try
     {
-        file_size = std::filesystem::file_size(file_ids_and_paths.back().second);
+        file_size = std::filesystem::file_size(std::get<1>(files_data.back()));
     }
     catch (const std::exception& ex)
     {
@@ -1012,7 +1017,7 @@ void http_session::process_uploading_file_data(
     }
 
     // Update the data about just uploaded file
-    if (!db_conn->update_uploaded_file(file_ids_and_paths.back().first, file_size).has_value())
+    if (!db_conn->update_uploaded_file(std::get<0>(files_data.back()), file_size).has_value())
     {
         process_file_cleanup();
    
@@ -1028,7 +1033,7 @@ void http_session::process_uploading_file_data(
     {
         std::thread{
             request_handlers::file_system::process_uploaded_files,
-            std::move(file_ids_and_paths), 
+            std::move(files_data), 
             user_id,
             folder_id, 
             std::move(db_conn)}.detach();
@@ -1053,5 +1058,5 @@ void http_session::process_uploading_file_data(
             folder_id, 
             std::move(file),
             std::move(db_conn),
-            std::move(file_ids_and_paths)));
+            std::move(files_data)));
 }

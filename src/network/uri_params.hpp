@@ -46,10 +46,12 @@ namespace uri_params
             return false;
         }
 
+        size_t end_position = uri.find('?', slash_position + 1);
+
         // Path parameter is a string
         if constexpr (std::is_same_v<param_value_t, std::string>)
         {
-            param_value_to_store = uri.substr(slash_position + 1);
+            param_value_to_store = uri.substr(slash_position + 1, end_position - slash_position - 1);
         }
         // Path parameter is a number
         else if constexpr (std::is_integral_v<param_value_t>)
@@ -59,7 +61,8 @@ namespace uri_params
             {
                 try
                 {
-                    param_value_to_store = std::stoull(std::string{uri.substr(slash_position + 1)});
+                    param_value_to_store = std::stoull(
+                        std::string{uri.substr(slash_position + 1, end_position - slash_position - 1)});
                 }
                 // Path parameter string value representation is not a number
                 catch (const std::exception&)
@@ -72,7 +75,8 @@ namespace uri_params
             {
                 try
                 {
-                    param_value_to_store = std::stoll(std::string{uri.substr(slash_position + 1)});
+                    param_value_to_store = std::stoll(
+                        std::string{uri.substr(slash_position + 1, end_position - slash_position - 1)});
                 }
                 // Path parameter string value representation is not a number
                 catch (const std::exception&)

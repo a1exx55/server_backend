@@ -94,7 +94,7 @@ class http_session : public std::enable_shared_from_this<http_session>
             size_t folder_id,
             std::ofstream&& file,
             database_connection_wrapper&& db, 
-            std::list<std::pair<size_t, std::string>>&& file_paths,
+            std::list<std::tuple<size_t, std::filesystem::path, std::string>>&& file_paths,
             beast::error_code error_code, std::size_t bytes_transferred);
 
         void process_uploading_file_data(
@@ -104,7 +104,7 @@ class http_session : public std::enable_shared_from_this<http_session>
             size_t folder_id,
             std::ofstream&& file,
             database_connection_wrapper&& db_conn, 
-            std::list<std::pair<size_t, std::string>>&& file_paths,
+            std::list<std::tuple<size_t, std::filesystem::path, std::string>>&& file_paths,
             beast::error_code error_code, std::size_t bytes_transferred);
 
         beast::ssl_stream<beast::tcp_stream> _stream;

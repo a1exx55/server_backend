@@ -17,6 +17,8 @@
 #include <variant>
 #include <queue>
 #include <filesystem>
+#include <format>
+#include <array>
 
 #include <unicode/unistr.h>
 #include <boost/regex.hpp>
@@ -43,6 +45,8 @@
 #include <boost/log/trivial.hpp>
 #include <boost/log/utility/setup.hpp>
 #include <boost/log/utility/manipulators/add_value.hpp>
+#include <boost/process/system.hpp>
+#include <boost/process/io.hpp>
 #include <bit7z/bitarchivereader.hpp>
 
 #include <config.hpp>

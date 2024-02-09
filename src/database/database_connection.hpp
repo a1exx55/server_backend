@@ -7,6 +7,7 @@
 //internal
 #include <stdint.h>
 #include <optional>
+#include <format>
 
 //external
 #include <pqxx/connection>
@@ -22,7 +23,7 @@ enum class file_status
     uploading,
     uploaded,
     unzipping,
-    recoding,
+    converting,
     ready_for_parsing,
     parsing
 };
@@ -90,6 +91,8 @@ class database_connection
 
         std::optional<json::object> get_files_info(size_t folder_id);
 
+        std::optional<std::string> get_file_path(size_t file_id);
+
         // Check if the folder with given id exists
         // Return true on folder existence, otherwise return false
         // Return empty std::optional on fail
@@ -103,7 +106,7 @@ class database_connection
         // Insert new file to the 'files' table
         // Return a pair of newly inserted file's id and path
         // Return empty std::optional on fail
-        std::optional<std::pair<size_t, std::string>> insert_uploading_file(
+        std::optional<std::tuple<size_t, std::filesystem::path, std::string>> insert_uploading_file(
             size_t user_id,
             size_t folder_id, 
             std::string_view file_name,
@@ -117,7 +120,7 @@ class database_connection
         // Return empty std::optional on fail
         std::optional<std::monostate> update_uploaded_file(size_t file_id, size_t file_size);
 
-        std::optional<std::pair<size_t, std::string>> insert_unzipped_file(
+        std::optional<std::tuple<size_t, std::filesystem::path, std::string>> insert_unzipped_file(
             size_t user_id,
             size_t folder_id,
             std::string_view file_name,
@@ -125,6 +128,13 @@ class database_connection
             size_t file_size);
 
         std::optional<std::monostate> change_file_status(size_t file_id, file_status new_status);
+
+        // Update 'files' table by changing extension, size and updating path with the new extension
+        std::optional<std::monostate> update_converted_file(
+            size_t file_id, 
+            std::string_view new_file_extension, 
+            std::string_view new_file_path, 
+            size_t new_file_size);
 
         std::optional<std::pair<std::vector<size_t>, std::vector<std::string>>> delete_files(
             const std::vector<size_t>& file_ids); 

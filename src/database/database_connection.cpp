@@ -1,21 +1,19 @@
 #include <database/database_connection.hpp>
 
 database_connection::database_connection(
-            std::string_view user_name, 
-            std::string_view password, 
-            std::string_view host, 
-            size_t port,
-            std::string_view database_name)
-            : _conn{std::string{"user="}
-                .append(user_name)
-                .append(" password=")
-                .append(password)
-                .append(" host=")
-                .append(host)
-                .append(" port=")
-                .append(std::to_string(port))
-                .append(" dbname=")
-                .append(database_name)}
+    std::string_view user_name, 
+    std::string_view password, 
+    std::string_view host, 
+    size_t port,
+    std::string_view database_name)
+    : _conn{
+        std::format(
+            "user={} password={} host={} port={} dbname={}",
+            user_name,
+            password,
+            host,
+            port,
+            database_name)}
 {}
 
 bool database_connection::reconnect()
@@ -40,15 +38,24 @@ bool database_connection::close_all_sessions_except_current_impl(
     try
     {
         size_t refresh_token_id = transaction.query_value<size_t>(
-            "SELECT id FROM refresh_tokens WHERE token=" + transaction.quote(refresh_token));
+            std::format(
+                "SELECT id FROM refresh_tokens "
+                "WHERE token={}",
+                transaction.quote(refresh_token)));
             
         transaction.exec0(
-            "UPDATE sessions SET logout_date=LOCALTIMESTAMP,status='inactive' WHERE user_id=" + 
-            pqxx::to_string(user_id) + " AND refresh_token_id<>" + pqxx::to_string(refresh_token_id));
+            std::format(
+                "UPDATE sessions SET logout_date=LOCALTIMESTAMP,status='inactive' "
+                "WHERE user_id={} AND refresh_token_id<>{}",
+                user_id,
+                refresh_token_id));
 
         transaction.exec0(
-            "DELETE FROM refresh_tokens WHERE user_id=" + pqxx::to_string(user_id) + 
-            " AND id<>" + pqxx::to_string(refresh_token_id));
+            std::format(
+                "DELETE FROM refresh_tokens "
+                "WHERE user_id={} AND id<>{}",
+                user_id,
+                refresh_token_id));
             
         transaction.commit();
 
@@ -67,18 +74,26 @@ bool database_connection::check_folder_existence_by_name_impl(
 {
     // Check if the folder with given name already exists
     return transaction.query_value<bool>(
-        "SELECT EXISTS(SELECT 1 FROM folders WHERE name=" + transaction.quote(folder_name) + ")");
+        std::format(    
+            "SELECT EXISTS"
+                "(SELECT 1 FROM folders "
+                "WHERE name={})",
+            transaction.quote(folder_name)));
 }
 
 bool database_connection::check_file_existence_by_name_impl(
-        pqxx::work& transaction, 
-        size_t folder_id, 
-        std::string_view file_name)
+    pqxx::work& transaction, 
+    size_t folder_id, 
+    std::string_view file_name)
 {
     // Check if the file with given name already exists
     return transaction.query_value<bool>(
-        "SELECT EXISTS(SELECT 1 FROM files WHERE folder_id=" + pqxx::to_string(folder_id) + 
-        " AND name=" + transaction.quote(file_name) + ")");
+        std::format(
+            "SELECT EXISTS"
+                "(SELECT 1 FROM files "
+                "WHERE folder_id={} AND name={})",
+            folder_id,
+            transaction.quote(file_name)));
 }
 
 std::optional<size_t> database_connection::login(std::string_view user_name, std::string_view password)
@@ -88,8 +103,11 @@ std::optional<size_t> database_connection::login(std::string_view user_name, std
     try
     {
         return transaction.query_value<size_t>(
-            "SELECT id FROM users WHERE nickname=" + transaction.quote(user_name) + 
-            " AND password=crypt(" + transaction.quote(password) + ",password)");
+            std::format(
+                "SELECT id FROM users "
+                "WHERE nickname={} AND password=crypt({},password)",
+                transaction.quote(user_name),
+                transaction.quote(password)));
     }
     // Connection is lost
     catch (const pqxx::broken_connection& ex)
@@ -140,23 +158,39 @@ std::optional<std::monostate> database_connection::insert_session(
             if (is_temporary_session)
             {
                 refresh_token_id = transaction.query_value<size_t>(
-                    "SELECT refresh_token_id FROM sessions WHERE user_id=" + 
-                    pqxx::to_string(user_id) + " AND status='temp'");
+                    std::format(
+                        "SELECT refresh_token_id FROM sessions "
+                        "WHERE user_id={} AND status='temp'",
+                        user_id));
             }
             else
             {
                 refresh_token_id = transaction.query_value<size_t>(
-                    "SELECT refresh_token_id FROM sessions WHERE (SELECT COUNT(*) FROM sessions WHERE user_id=" +
-                    pqxx::to_string(user_id) + " AND status='active')>=5 AND id=(SELECT id FROM sessions WHERE "
-                    "user_id=" + pqxx::to_string(user_id) + " AND status='active' ORDER BY last_seen_date LIMIT 1)");
+                    std::format(
+                        "SELECT refresh_token_id FROM sessions "
+                        "WHERE "
+                            "(SELECT COUNT(*) FROM sessions "
+                            "WHERE user_id={0} AND status='active')>=5 "
+                        "AND id="
+                            "(SELECT id FROM sessions "
+                            "WHERE user_id={0} AND status='active' "
+                            "ORDER BY last_seen_date "
+                            "LIMIT 1)",
+                        user_id));
             }
 
             transaction.exec0(
-                "UPDATE sessions SET logout_date=LOCALTIMESTAMP,ip=" + transaction.quote(user_ip) +
-                ",status='inactive' WHERE refresh_token_id=" + pqxx::to_string(refresh_token_id));
+                std::format(
+                    "UPDATE sessions SET logout_date=LOCALTIMESTAMP,ip={},status='inactive' "
+                    "WHERE refresh_token_id={}",
+                    transaction.quote(user_ip),
+                    refresh_token_id));
 
             transaction.exec0(
-                "DELETE FROM refresh_tokens WHERE id=" + pqxx::to_string(refresh_token_id));
+                std::format(
+                    "DELETE FROM refresh_tokens "
+                    "WHERE id={}",
+                    refresh_token_id));
         }
         // Either there is no temporary session yet or there are less than 5 active permanent sessions
         // so no need to close anything
@@ -165,15 +199,23 @@ std::optional<std::monostate> database_connection::insert_session(
 
         // Insert new refresh token
         refresh_token_id = transaction.query_value<size_t>(
-            "INSERT INTO refresh_tokens (token,user_id) VALUES (" + transaction.quote(refresh_token) + 
-            "," + pqxx::to_string(user_id) + ") RETURNING id");
+            std::format(
+                "INSERT INTO refresh_tokens (token,user_id) "
+                "VALUES ({},{}) "
+                "RETURNING id",
+                transaction.quote(refresh_token),
+                user_id));
 
         // Insert new session
         transaction.exec0(
-            "INSERT INTO sessions (user_id,refresh_token_id,user_agent,ip,status) VALUES (" +
-            pqxx::to_string(user_id) + "," + pqxx::to_string(refresh_token_id) + "," +
-            transaction.quote(user_agent) + "," + transaction.quote(user_ip) + "," + 
-            (is_temporary_session ? "'temp'" : "'active'") + ")");
+            std::format(
+                "INSERT INTO sessions (user_id,refresh_token_id,user_agent,ip,status) "
+                "VALUES ({},{},{},{},{})",
+                user_id,
+                refresh_token_id,
+                transaction.quote(user_agent),
+                transaction.quote(user_ip),
+                (is_temporary_session ? "'temp'" : "'active'")));
             
         transaction.commit();
 
@@ -210,14 +252,23 @@ std::optional<bool> database_connection::close_current_session(std::string_view 
         // To close session we have to delete refresh token from corresponding table, update user ip and
         // change session status to 'inactive' and logout_date to current time
         size_t refresh_token_id = transaction.query_value<size_t>(
-            "SELECT id FROM refresh_tokens WHERE token=" + transaction.quote(refresh_token));
+            std::format(
+                "SELECT id FROM refresh_tokens "
+                "WHERE token={}",
+                transaction.quote(refresh_token)));
             
         transaction.exec0(
-            "UPDATE sessions SET logout_date=LOCALTIMESTAMP,ip=" + transaction.quote(user_ip) +
-            ",status='inactive' WHERE refresh_token_id=" + pqxx::to_string(refresh_token_id));
+            std::format(
+                "UPDATE sessions SET logout_date=LOCALTIMESTAMP,ip={},status='inactive' "
+                "WHERE refresh_token_id={}",
+                transaction.quote(user_ip),
+                refresh_token_id));
 
         transaction.exec0(
-            "DELETE FROM refresh_tokens WHERE id=" + pqxx::to_string(refresh_token_id));
+            std::format(
+                "DELETE FROM refresh_tokens "
+                "WHERE id={}",
+                refresh_token_id));
             
         transaction.commit();
 
@@ -262,12 +313,19 @@ std::optional<bool> database_connection::update_refresh_token(
         // Except just updating refresh token we have to update session's info 
         // by changing last seen date to current time and updating user ip
         size_t refresh_token_id = transaction.query_value<size_t>(
-            "UPDATE refresh_tokens SET token=" + transaction.quote(new_refresh_token) + 
-            " WHERE token=" + transaction.quote(old_refresh_token) + " RETURNING id");
+            std::format(
+                "UPDATE refresh_tokens SET token={} "
+                "WHERE token={} "
+                "RETURNING id",
+                transaction.quote(new_refresh_token),
+                transaction.quote(old_refresh_token)));
             
         transaction.exec0(
-            "UPDATE sessions SET last_seen_date=LOCALTIMESTAMP,ip=" + transaction.quote(user_ip) +
-            " WHERE refresh_token_id=" + pqxx::to_string(refresh_token_id));
+            std::format(
+                "UPDATE sessions SET last_seen_date=LOCALTIMESTAMP,ip={} "
+                "WHERE refresh_token_id={}",
+                transaction.quote(user_ip),
+                refresh_token_id));
             
         transaction.commit();
 
@@ -307,7 +365,10 @@ std::optional<json::object> database_connection::get_sessions_info(size_t user_i
     try
     {
         size_t refresh_token_id = transaction.query_value<size_t>(
-            "SELECT id FROM refresh_tokens WHERE token=" + transaction.quote(refresh_token));
+            std::format(
+                "SELECT id FROM refresh_tokens "
+                "WHERE token={}",
+                transaction.quote(refresh_token)));
 
         json::object sessions_json;
 
@@ -316,8 +377,10 @@ std::optional<json::object> database_connection::get_sessions_info(size_t user_i
             // Select current session's data and add it to json
             auto [id, login_date, last_seen_date, user_agent, ip] = 
                 transaction.query1<size_t, std::string, std::string, std::string, std::string>(
-                    "SELECT id,login_date,last_seen_date,user_agent,ip FROM sessions "
-                    "WHERE refresh_token_id=" + pqxx::to_string(refresh_token_id));
+                    std::format(
+                        "SELECT id,login_date,last_seen_date,user_agent,ip FROM sessions "
+                        "WHERE refresh_token_id={}",
+                        refresh_token_id));
             
             sessions_json.emplace(
                 "currentSession",
@@ -337,9 +400,12 @@ std::optional<json::object> database_connection::get_sessions_info(size_t user_i
         // Select active sessions except current one and add them to json
         for (auto [id, login_date, last_seen_date, user_agent, ip] : 
             transaction.query<size_t, std::string, std::string, std::string, std::string>(
-                "SELECT id,login_date,last_seen_date,user_agent,ip FROM sessions WHERE user_id=" + 
-                pqxx::to_string(user_id) + " AND status<>'inactive' AND refresh_token_id<>" + 
-                pqxx::to_string(refresh_token_id) + " ORDER BY last_seen_date DESC"))
+                std::format(
+                    "SELECT id,login_date,last_seen_date,user_agent,ip FROM sessions "
+                    "WHERE user_id={} AND status<>'inactive' AND refresh_token_id<>{} " 
+                    "ORDER BY last_seen_date DESC",
+                    user_id,
+                    refresh_token_id)))
         {
             other_active_sessions_array.emplace_back(
                 json::object
@@ -358,8 +424,12 @@ std::optional<json::object> database_connection::get_sessions_info(size_t user_i
         // Select inactive sessions and add them to json
         for (auto [id, login_date, logout_date, user_agent, ip] : 
             transaction.query<size_t, std::string, std::string, std::string, std::string>(
-                "SELECT id,login_date,logout_date,user_agent,ip FROM sessions WHERE user_id=" + 
-                pqxx::to_string(user_id) + " AND status='inactive' ORDER BY logout_date DESC LIMIT 15"))
+                std::format(
+                    "SELECT id,login_date,logout_date,user_agent,ip FROM sessions "
+                    "WHERE user_id={} AND status='inactive' "
+                    "ORDER BY logout_date DESC "
+                    "LIMIT 15",
+                    user_id)))
         {
             inactive_sessions_array.emplace_back(
                 json::object
@@ -410,15 +480,23 @@ std::optional<bool> database_connection::close_own_session(size_t session_id, si
         // User is able to close only own sessions so check if session with session_id 
         // belongs to user with user_id - query below will throw if session is not own
         size_t refresh_token_id = transaction.query_value<size_t>(
-            "SELECT refresh_token_id FROM sessions WHERE id=" + pqxx::to_string(session_id) +
-            " AND user_id=" + pqxx::to_string(user_id) + " AND status<>'inactive'");
+            std::format(
+                "SELECT refresh_token_id FROM sessions "
+                "WHERE id={} AND user_id={} AND status<>'inactive'",
+                session_id,
+                user_id));
             
         transaction.exec0(
-            "UPDATE sessions SET logout_date=LOCALTIMESTAMP,status='inactive' "
-            "WHERE refresh_token_id=" + pqxx::to_string(refresh_token_id));
+            std::format(
+                "UPDATE sessions SET logout_date=LOCALTIMESTAMP,status='inactive' "
+                "WHERE refresh_token_id={}",
+                refresh_token_id));
 
         transaction.exec0(
-            "DELETE FROM refresh_tokens WHERE id=" + pqxx::to_string(refresh_token_id));
+            std::format(
+                "DELETE FROM refresh_tokens "
+                "WHERE id={}",
+                refresh_token_id));
             
         transaction.commit();
 
@@ -488,8 +566,12 @@ std::optional<bool> database_connection::validate_password(size_t user_id, std::
     try
     {
         return transaction.query_value<bool>(
-            "SELECT EXISTS(SELECT 1 FROM users WHERE id=" + pqxx::to_string(user_id) + 
-            " AND password=crypt(" + transaction.quote(password) + ",password))");
+            std::format(
+                "SELECT EXISTS"
+                    "(SELECT 1 FROM users "
+                    "WHERE id={} AND password=crypt({},password))",
+                user_id,
+                transaction.quote(password)));
     }
     // Connection is lost
     catch (const pqxx::broken_connection& ex)
@@ -523,8 +605,11 @@ std::optional<bool> database_connection::change_password(
     try
     {
         transaction.exec0(
-            "UPDATE users SET password=crypt(" + transaction.quote(new_password) + 
-            ",gen_salt('bf',7)) WHERE id=" + pqxx::to_string(user_id));
+            std::format(
+                "UPDATE users SET password=crypt({},gen_salt('bf',7)) "
+                "WHERE id={}",
+                transaction.quote(new_password),
+                user_id));
 
         return close_all_sessions_except_current_impl(transaction, user_id, refresh_token);
     }
@@ -562,7 +647,8 @@ std::optional<json::array> database_connection::get_folders_info()
         for (auto [id, name, last_upload_date, created_by, files_number] : 
             transaction.query<size_t, std::string, std::optional<std::string>, std::string, size_t>(
                 "SELECT folders.id,folders.name,folders.last_upload_date,users.nickname,folders.files_number "
-                "FROM folders JOIN users ON folders.created_by_user_id=users.id"))
+                "FROM folders "
+                "JOIN users ON folders.created_by_user_id=users.id"))
         {
             folder_json = 
                 json::object
@@ -655,10 +741,14 @@ std::optional<std::pair<json::object, std::string>> database_connection::insert_
     {
         // Insert folder with given data
         auto [folder_id, folder_path] = transaction.query1<size_t, std::string>(
-            "WITH current_id AS (SELECT nextval('folders_id_seq')) INSERT INTO folders "
-            "(id,name,path,created_by_user_id) VALUES ((SELECT * FROM current_id)," + 
-            transaction.quote(folder_name) + "," + transaction.quote(config::FOLDERS_PATH) +
-            "|| (SELECT * FROM current_id)::text || '/'," + pqxx::to_string(user_id) + ") RETURNING id,path");
+            std::format(
+                "WITH current_id AS (SELECT nextval('folders_id_seq')) "
+                    "INSERT INTO folders (id,name,path,created_by_user_id) "
+                    "VALUES ((SELECT * FROM current_id),{},{} || (SELECT * FROM current_id)::text || '/',{}) "
+                    "RETURNING id,path",
+                transaction.quote(folder_name),
+                transaction.quote(config::FOLDERS_PATH),
+                user_id));
 
         json::object folder_data_json;
 
@@ -705,19 +795,24 @@ std::optional<std::pair<std::vector<size_t>, std::vector<std::string>>> database
         std::vector<size_t> deleted_folder_ids;
         std::vector<std::string> deleted_folder_paths;
 
-        std::string query = "DELETE FROM folders WHERE id IN (";
+        std::string folder_ids_list;
         
         for (size_t folder_id : folder_ids)
         {
-            query.append(std::to_string(folder_id) + ",");
+            folder_ids_list.append(std::to_string(folder_id) + ",");
         }
 
-        query.erase(query.size() - 1);
-        query.append(
-            ") AND NOT (SELECT EXISTS(SELECT 1 FROM files WHERE folder_id=folders.id AND "
-            "status<>'ready_for_parsing')) RETURNING id,path");
+        folder_ids_list.erase(folder_ids_list.size() - 1);
 
-        for (auto [deleted_folder_id, deleted_folder_path] : transaction.query<size_t, std::string>(query))
+        for (auto [deleted_folder_id, deleted_folder_path] : transaction.query<size_t, std::string>(
+            std::format(
+                "DELETE FROM folders "
+                "WHERE id IN ({}) AND NOT "
+                    "(SELECT EXISTS"
+                        "(SELECT 1 FROM files "
+                        "WHERE folder_id=folders.id AND status<>'ready_for_parsing')) "
+                "RETURNING id,path",
+                folder_ids_list)))
         {
             deleted_folder_ids.emplace_back(deleted_folder_id);
             deleted_folder_paths.emplace_back(std::move(deleted_folder_path));
@@ -756,8 +851,11 @@ std::optional<bool> database_connection::rename_folder(size_t folder_id, std::st
     try
     {
         _result = transaction.exec0(
-            "UPDATE folders SET name=" + transaction.quote(new_folder_name) + 
-            " WHERE id=" + pqxx::to_string(folder_id));
+            std::format(
+                "UPDATE folders SET name={} "
+                "WHERE id={}",
+                transaction.quote(new_folder_name),
+                folder_id));
 
         // Check if the update has occured i.e. folder with given id actually exists
         if (_result.affected_rows())
@@ -800,7 +898,10 @@ std::optional<json::object> database_connection::get_files_info(size_t folder_id
     {
         // Get the folder name by its id or throw if folder with this id doesn't exist
         std::string folder_name = transaction.query_value<std::string>(
-            "SELECT name FROM folders WHERE id=" + pqxx::to_string(folder_id));
+            std::format(
+                "SELECT name FROM folders "
+                "WHERE id={}",
+                folder_id));
 
         // Create json for files data and add corresponding folder name
         json::object files_data_json
@@ -815,9 +916,12 @@ std::optional<json::object> database_connection::get_files_info(size_t folder_id
 
         for (auto [id, name, size, upload_date, uploaded_by, status] : 
             transaction.query<size_t, std::string, std::optional<size_t>, std::optional<std::string>, std::string, std::string>(
-                "SELECT files.id,files.name || '.' || files.extension,files.size,files.upload_date,users.nickname,"
-                "files.status FROM files JOIN users ON files.uploaded_by_user_id=users.id " 
-                "WHERE files.folder_id=" + pqxx::to_string(folder_id)))
+                std::format(
+                    "SELECT files.id,files.name ||'.'|| files.extension,files.size,files.upload_date,"
+                        "users.nickname,files.status FROM files "
+                    "JOIN users ON files.uploaded_by_user_id=users.id " 
+                    "WHERE files.folder_id={}",
+                    folder_id)))
         {
             file_data_json = 
                 json::object
@@ -881,6 +985,45 @@ std::optional<json::object> database_connection::get_files_info(size_t folder_id
     } 
 }
 
+std::optional<std::string> database_connection::get_file_path(size_t file_id)
+{
+    pqxx::work transaction{*_conn};
+    
+    try
+    {
+        return transaction.query_value<std::string>(
+            std::format(
+                "SELECT path FROM files "
+                "WHERE id={}",
+                file_id));
+    }
+    // Connection is lost
+    catch (const pqxx::broken_connection& ex)
+    {
+        transaction.abort();
+        
+        if (reconnect())
+        {
+            return get_file_path(file_id);
+        }
+        else
+        {
+            LOG_ERROR << ex.what();
+            return {};
+        }
+    }
+    // File with given id doesn't exist
+    catch (const pqxx::unexpected_rows&)
+    {
+        return "";
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_ERROR << ex.what();
+        return {};
+    } 
+}
+
 std::optional<bool> database_connection::check_folder_existence_by_id(size_t folder_id)
 {
     pqxx::work transaction{*_conn};
@@ -888,7 +1031,11 @@ std::optional<bool> database_connection::check_folder_existence_by_id(size_t fol
     try
     {
         return transaction.query_value<bool>(
-            "SELECT EXISTS(SELECT 1 FROM folders WHERE id=" + pqxx::to_string(folder_id) + ")");
+            std::format(
+                "SELECT EXISTS"
+                    "(SELECT 1 FROM folders "
+                    "WHERE id={})",
+                folder_id));
     }
     // Connection is lost
     catch (const pqxx::broken_connection& ex)
@@ -945,7 +1092,7 @@ std::optional<bool> database_connection::check_file_existence_by_name(size_t fol
     }
 }
 
-std::optional<std::pair<size_t, std::string>> database_connection::insert_uploading_file(
+std::optional<std::tuple<size_t, std::filesystem::path, std::string>> database_connection::insert_uploading_file(
     size_t user_id, 
     size_t folder_id,
     std::string_view file_name,
@@ -956,16 +1103,20 @@ std::optional<std::pair<size_t, std::string>> database_connection::insert_upload
     try
     {
         auto [file_id, file_path] = transaction.query1<size_t, std::string>(
-            "WITH current_id AS (SELECT nextval('files_id_seq')) INSERT INTO files (id,name,extension," 
-            "path,folder_id,uploaded_by_user_id) VALUES ((SELECT * FROM current_id)," + 
-            transaction.quote(file_name) + "," + transaction.quote(file_extension) + "," + 
-            transaction.quote(config::FOLDERS_PATH + pqxx::to_string(folder_id)) + 
-            "||'/'||(SELECT * FROM current_id)::text||'.'||" + transaction.quote(file_extension) + "," + 
-            pqxx::to_string(folder_id) + "," + pqxx::to_string(user_id) + ") RETURNING id, path");
+            std::format(
+                "WITH current_id AS (SELECT nextval('files_id_seq')) "
+                    "INSERT INTO files (id,name,extension,path,folder_id,uploaded_by_user_id) "
+                    "VALUES ((SELECT * FROM current_id),{0},{1},{2}||{3}||'/'||(SELECT * FROM current_id)::text||'.'||{1},{3},{4}) "
+                    "RETURNING id,path",
+                transaction.quote(file_name),
+                transaction.quote(file_extension),
+                transaction.quote(config::FOLDERS_PATH),
+                folder_id,
+                user_id));
 
         transaction.commit();
 
-        return {{file_id, file_path}};
+        return std::tuple<size_t, std::filesystem::path, std::string>{file_id, file_path, file_extension};
     }
     // Connection is lost
     catch (const pqxx::broken_connection& ex)
@@ -995,7 +1146,11 @@ std::optional<std::monostate> database_connection::delete_file(size_t file_id)
     
     try
     {
-        transaction.exec0("DELETE FROM files WHERE id=" + pqxx::to_string(file_id));
+        transaction.exec0(
+            std::format(
+                "DELETE FROM files "
+                "WHERE id={}",
+                file_id));
         
         transaction.commit();
 
@@ -1029,8 +1184,12 @@ std::optional<std::monostate> database_connection::update_uploaded_file(size_t f
     
     try
     {
-        transaction.exec0("UPDATE files SET size=" + pqxx::to_string(file_size) +
-            ",upload_date=LOCALTIMESTAMP,status='uploaded' WHERE id=" + pqxx::to_string(file_id));
+        transaction.exec0(
+            std::format(
+                "UPDATE files SET size={},upload_date=LOCALTIMESTAMP,status='uploaded' "
+                "WHERE id={}",
+                file_size,
+                file_id));
         
         transaction.commit();
     
@@ -1058,7 +1217,7 @@ std::optional<std::monostate> database_connection::update_uploaded_file(size_t f
     }
 }
 
-std::optional<std::pair<size_t, std::string>> database_connection::insert_unzipped_file(
+std::optional<std::tuple<size_t, std::filesystem::path, std::string>> database_connection::insert_unzipped_file(
     size_t user_id,
     size_t folder_id,
     std::string_view file_name,
@@ -1070,17 +1229,22 @@ std::optional<std::pair<size_t, std::string>> database_connection::insert_unzipp
     try
     {
         auto [file_id, file_path] = transaction.query1<size_t, std::string>(
-            "WITH current_id AS (SELECT nextval('files_id_seq')) INSERT INTO files (id,name,extension," 
-            "path,folder_id,size,upload_date,uploaded_by_user_id,status) VALUES ((SELECT * FROM current_id)," + 
-            transaction.quote(file_name) + "," + transaction.quote(file_extension) + "," + 
-            transaction.quote(config::FOLDERS_PATH + pqxx::to_string(folder_id)) + 
-            "||'/'||(SELECT * FROM current_id)::text||'.'||" + transaction.quote(file_extension) + "," + 
-            pqxx::to_string(folder_id) + "," + pqxx::to_string(file_size) + ",LOCALTIMESTAMP," + 
-            pqxx::to_string(user_id) + ",'uploaded') RETURNING id, path");
+            std::format(
+                "WITH current_id AS (SELECT nextval('files_id_seq')) "
+                    "INSERT INTO files (id,name,extension,path,folder_id,size,upload_date,uploaded_by_user_id,status) "
+                    "VALUES ((SELECT * FROM current_id),{0},{1},{2}||{3}||'/'||(SELECT * FROM current_id)::text||'.'||"
+                        "{1},{3},{4},LOCALTIMESTAMP,{5},'uploaded') "
+                    "RETURNING id,path",
+                transaction.quote(file_name),
+                transaction.quote(file_extension),
+                transaction.quote(config::FOLDERS_PATH),
+                folder_id,
+                file_size,
+                user_id));
 
         transaction.commit();
 
-        return {{file_id, file_path}};
+        return std::tuple<size_t, std::filesystem::path, std::string>{file_id, file_path, file_extension};
     }
     // Connection is lost
     catch (const pqxx::broken_connection& ex)
@@ -1110,8 +1274,12 @@ std::optional<std::monostate> database_connection::change_file_status(size_t fil
     
     try
     {
-        transaction.exec0("UPDATE files SET status=" + transaction.quote(magic_enum::enum_name(new_status)) + 
-            " WHERE id=" + pqxx::to_string(file_id));
+        transaction.exec0(
+            std::format(
+                "UPDATE files SET status={} " 
+                "WHERE id={}",
+                transaction.quote(magic_enum::enum_name(new_status)),
+                file_id));
         
         transaction.commit();
     
@@ -1139,6 +1307,52 @@ std::optional<std::monostate> database_connection::change_file_status(size_t fil
     }
 }
 
+std::optional<std::monostate> database_connection::update_converted_file(
+    size_t file_id, 
+    std::string_view new_file_extension, 
+    std::string_view new_file_path, 
+    size_t new_file_size)
+{
+    pqxx::work transaction{*_conn};
+    
+    try
+    {
+        // Update extension and path replacing the old extension to the new one
+        transaction.exec0(
+            std::format(
+                "UPDATE files SET extension={},path={},size={} " 
+                "WHERE id={}",
+                transaction.quote(new_file_extension),
+                transaction.quote(new_file_path),
+                new_file_size,
+                file_id));
+        
+        transaction.commit();
+    
+        return std::monostate{};
+    }
+    // Connection is lost
+    catch (const pqxx::broken_connection& ex)
+    {
+        transaction.abort();
+        
+        if (reconnect())
+        {
+            return update_converted_file(file_id, new_file_extension, new_file_path, new_file_size);
+        }
+        else
+        {
+            LOG_ERROR << ex.what();
+            return {};
+        }
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_ERROR << ex.what();
+        return {};
+    }
+}
+
 std::optional<std::pair<std::vector<size_t>, std::vector<std::string>>> database_connection::delete_files(
     const std::vector<size_t>& file_ids)
 {
@@ -1149,17 +1363,21 @@ std::optional<std::pair<std::vector<size_t>, std::vector<std::string>>> database
         std::vector<size_t> deleted_file_ids;
         std::vector<std::string> deleted_file_paths;
 
-        std::string query = "DELETE FROM files WHERE id IN (";
+        std::string file_ids_list;
         
         for (size_t file_id : file_ids)
         {
-            query.append(std::to_string(file_id) + ",");
+            file_ids_list.append(std::to_string(file_id) + ",");
         }
 
-        query.erase(query.size() - 1);
-        query.append(") AND status='ready_for_parsing' RETURNING id,path");
+        file_ids_list.erase(file_ids_list.size() - 1);
 
-        for (auto [deleted_file_id, deleted_file_path] : transaction.query<size_t, std::string>(query))
+        for (auto [deleted_file_id, deleted_file_path] : transaction.query<size_t, std::string>(
+            std::format(
+                "DELETE FROM files "
+                "WHERE id IN ({}) AND status='ready_for_parsing' "
+                "RETURNING id,path",
+                file_ids_list)))
         {
             deleted_file_ids.emplace_back(deleted_file_id);
             deleted_file_paths.emplace_back(std::move(deleted_file_path));
@@ -1198,7 +1416,10 @@ std::optional<size_t> database_connection::get_folder_id_by_file_id(size_t file_
     try
     {
         return transaction.query_value<size_t>(
-            "SELECT folder_id FROM files WHERE id=" + pqxx::to_string(file_id));
+            std::format(
+                "SELECT folder_id FROM files "
+                "WHERE id={}",
+                file_id));
     }
     // Connection is lost
     catch (const pqxx::broken_connection& ex)
@@ -1234,8 +1455,11 @@ std::optional<bool> database_connection::rename_file(size_t file_id, std::string
     try
     {
         _result = transaction.exec0(
-            "UPDATE files SET name=" + transaction.quote(new_file_name) + 
-            " WHERE id=" + pqxx::to_string(file_id));
+            std::format(
+                "UPDATE files SET name={} "
+                "WHERE id={}",
+                transaction.quote(new_file_name),
+                file_id));
 
         // Check if the update has occured i.e. file with given id actually exists
         if (_result.affected_rows())

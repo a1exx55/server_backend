@@ -1,9 +1,6 @@
 #ifndef CONFIG_HPP
 #define CONFIG_HPP
 
-//local
-#include <logging/logger.hpp>
-
 //internal
 #include <string>
 #include <stdint.h>
@@ -26,7 +23,7 @@ namespace config
     inline uint_least16_t SERVER_PORT;
     inline std::string DOMAIN_NAME;
     inline int THREADS_NUMBER;
-    inline size_t DATABASE_CONNNECTIONS_NUMBER;
+    inline size_t DATABASE_CONNECTIONS_NUMBER;
     inline size_t DATABASE_PORT;
     inline std::string DATABASE_NAME;
     inline std::string DATABASE_USERNAME;
@@ -67,7 +64,7 @@ namespace config
         SERVER_PORT = config_json.at("SERVER_PORT").to_number<uint_least16_t>();
         DOMAIN_NAME = config_json.at("DOMAIN_NAME").as_string();
         THREADS_NUMBER = config_json.at("THREADS_NUMBER").to_number<int>();
-        DATABASE_CONNNECTIONS_NUMBER = config_json.at("DATABASE_CONNNECTIONS_NUMBER").to_number<size_t>();
+        DATABASE_CONNECTIONS_NUMBER = config_json.at("DATABASE_CONNECTIONS_NUMBER").to_number<size_t>();
         DATABASE_PORT = config_json.at("DATABASE_PORT").to_number<size_t>();
         DATABASE_NAME = config_json.at("DATABASE_NAME").as_string();
         DATABASE_USERNAME = config_json.at("DATABASE_USERNAME").as_string();

@@ -31,7 +31,7 @@ namespace server
 
             // Initialize pool of database connections
             database_connections_pool::init(
-                config::DATABASE_CONNNECTIONS_NUMBER,
+                config::DATABASE_CONNECTIONS_NUMBER,
                 config::DATABASE_USERNAME,
                 config::DATABASE_PASSWORD,
                 "127.0.0.1",
@@ -87,7 +87,7 @@ namespace server
 
             LOG_INFO << "The server was successfully shut down!";
         }
-        catch(const std::exception& ex)
+        catch (const std::exception& ex)
         {
             LOG_ERROR << ex.what();
             LOG_INFO << "The server was unexpectedly shut down due to an error!";

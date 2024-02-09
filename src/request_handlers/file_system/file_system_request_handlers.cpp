@@ -31,6 +31,144 @@ void request_handlers::file_system::get_folders_info(
     response.body = json::serialize(folders_info_array_opt.value());
 }
 
+void request_handlers::file_system::get_file_rows_number(const request_params& request, response_params& response)
+{
+    size_t file_id;
+
+    if (!uri_params::get_path_parameter(request.uri, file_id))
+    {
+        return prepare_error_response(
+            response,
+            http::status::unprocessable_entity, 
+            "Invalid file id");
+    }
+
+    database_connection_wrapper db_conn = database_connections_pool::get();
+
+    // No available connections
+    if (!db_conn)
+    {
+        return prepare_error_response(
+            response, 
+            http::status::internal_server_error, 
+            "No available database connections");
+    }
+    
+    // Get file path by id to interact with file itself
+    std::optional<std::string> file_path_opt = db_conn->get_file_path(file_id); 
+
+    // An error occured with database connection
+    if (!file_path_opt.has_value())
+    {
+        return prepare_error_response(
+            response, 
+            http::status::internal_server_error, 
+            "Internal server error occured");
+    }
+
+    // File with given if doesn't exist
+    if (file_path_opt.value() == "")
+    {
+        return prepare_error_response(
+            response,
+            http::status::not_found, 
+            "File was not found");
+    }
+
+    size_t file_rows_number = file_preview::get_file_rows_number(file_path_opt.value());
+
+    // An error occured with file
+    if (file_rows_number == -1)
+    {
+        return prepare_error_response(
+            response,
+            http::status::internal_server_error, 
+            "Internal server error occured");
+    }
+
+    response.body = json::serialize(
+        json::object
+        {
+            {"rowsNumber", file_rows_number}
+        });
+}
+
+void request_handlers::file_system::get_file_raw_rows(const request_params& request, response_params& response)
+{
+    size_t file_id;
+
+    if (!uri_params::get_path_parameter(request.uri, file_id))
+    {
+        return prepare_error_response(
+            response,
+            http::status::unprocessable_entity, 
+            "Invalid file id");
+    }
+
+    size_t from_row_number, rows_number;
+
+    if (!uri_params::get_query_parameters(request.uri, "fromRowNumber", from_row_number))
+    {
+        return prepare_error_response(
+            response,
+            http::status::unprocessable_entity, 
+            "Invalid row parameters");
+    }
+
+    if (!uri_params::get_query_parameters(request.uri, "rowsNumber", rows_number))
+    {
+        return prepare_error_response(
+            response,
+            http::status::unprocessable_entity, 
+            "Invalid row parameters");
+    }
+
+    database_connection_wrapper db_conn = database_connections_pool::get();
+
+    // No available connections
+    if (!db_conn)
+    {
+        return prepare_error_response(
+            response, 
+            http::status::internal_server_error, 
+            "No available database connections");
+    }
+    
+    // Get file path by id to interact with file itself
+    std::optional<std::string> file_path_opt = db_conn->get_file_path(file_id); 
+
+    // An error occured with database connection
+    if (!file_path_opt.has_value())
+    {
+        return prepare_error_response(
+            response, 
+            http::status::internal_server_error, 
+            "Internal server error occured");
+    }
+
+    // File with given if doesn't exist
+    if (file_path_opt.value() == "")
+    {
+        return prepare_error_response(
+            response,
+            http::status::not_found, 
+            "File was not found");
+    }
+
+    json::array file_rows = file_preview::get_file_raw_rows(file_path_opt.value(), from_row_number, rows_number);
+
+    // An error occured with file
+    if (file_rows.empty())
+    {
+        return prepare_error_response(
+            response,
+            http::status::unprocessable_entity, 
+            "Invalid row parameters");
+    }
+
+    response.body = json::serialize(file_rows);
+}
+
 void request_handlers::file_system::create_folder(const request_params& request, response_params& response)
 {
     try
@@ -347,30 +485,29 @@ void request_handlers::file_system::get_files_info(const request_params& request
 }
 
 void request_handlers::file_system::unzip_archives(
-    std::list<std::pair<size_t, std::string>>& file_ids_and_paths,
+    std::list<std::tuple<size_t, std::filesystem::path, std::string>>& files_data,
     size_t user_id,
     size_t folder_id,
     database_connection_wrapper& db_conn)
 {
-    for (auto file_id_and_path_it = file_ids_and_paths.cbegin(); file_id_and_path_it != file_ids_and_paths.cend();)
+    for (auto file_data_it = files_data.cbegin(); file_data_it != files_data.cend();)
     {
         // Check if the file has one of the allowed archive extensions
-        if (config::ALLOWED_ARCHIVE_EXTENSIONS.contains(
-            file_id_and_path_it->second.substr(file_id_and_path_it->second.find_last_of('.') + 1)))
+        if (config::ALLOWED_ARCHIVE_EXTENSIONS.contains(std::get<2>(*file_data_it)))
         {
-            if (!db_conn->change_file_status(file_id_and_path_it->first, file_status::unzipping))
+            if (!db_conn->change_file_status(std::get<0>(*file_data_it), file_status::unzipping))
             {
                 continue;
             }
             
             // Create temporary folder with unique name to extract the archive files into it
-            std::string temp_archive_folder = 
-                std::filesystem::path(file_id_and_path_it->second).parent_path().string() + "/" +
+            std::filesystem::path temp_archive_folder_path = 
+                std::get<1>(*file_data_it).parent_path() /
                 std::to_string(std::chrono::high_resolution_clock::now().time_since_epoch().count());
 
             try
             {
-                std::filesystem::create_directory(temp_archive_folder);
+                std::filesystem::create_directory(temp_archive_folder_path);
             }
             catch (const std::exception& ex)
             {
@@ -381,19 +518,8 @@ void request_handlers::file_system::unzip_archives(
             try
             {
                 static bit7z::Bit7zLibrary lib_7zip{config::PATH_TO_7ZIP_LIB};
-                bit7z::BitArchiveReader archive_reader{lib_7zip, file_id_and_path_it->second};
+                bit7z::BitArchiveReader archive_reader{lib_7zip, std::get<1>(*file_data_it)};
                 
-                // If the archive is encrypted then set the password with its name without extension
-                // (just the agreement to not implementing passing the archive password somehow) 
-                // if (archive_reader.isEncrypted())
-                // {
-                //     std::string archive_file_name = 
-                //         std::filesystem::path(file_id_and_path_it->second).filename().string();
-
-                //     archive_reader.setPassword(
-                //         archive_file_name.substr(0, archive_file_name.find_last_of('.')));
-                // }
-
                 // Don't retain archive structure to extract only files without nested folders
                 archive_reader.setRetainDirectories(false);
 
@@ -408,7 +534,7 @@ void request_handlers::file_system::unzip_archives(
                     }
 
                     // Unzip file to the prepared folder
-                    archive_reader.extractTo(temp_archive_folder, {archive_item.index()});
+                    archive_reader.extractTo(temp_archive_folder_path, {archive_item.index()});
 
                     // Get the file name without extension
                     std::string file_name = archive_item.name().erase(archive_item.name().find_last_of('.'));
@@ -473,7 +599,7 @@ void request_handlers::file_system::unzip_archives(
                         }       
                     }
 
-                    std::optional<std::pair<size_t, std::string>> unzipped_file_id_and_path_opt = 
+                    std::optional<std::tuple<size_t, std::filesystem::path, std::string>> unzipped_file_data_opt = 
                         db_conn->insert_unzipped_file(
                             user_id,
                             folder_id,
@@ -481,7 +607,7 @@ void request_handlers::file_system::unzip_archives(
                             archive_item.extension(),
                             archive_item.size());
 
-                    if (!unzipped_file_id_and_path_opt.has_value())
+                    if (!unzipped_file_data_opt.has_value())
                     {
                         break;
                     }
@@ -491,20 +617,20 @@ void request_handlers::file_system::unzip_archives(
                     try
                     {
                         std::filesystem::rename(
-                            temp_archive_folder + "/" + archive_item.name(), 
-                            unzipped_file_id_and_path_opt->second);
+                            temp_archive_folder_path / archive_item.name(), 
+                            std::get<1>(unzipped_file_data_opt.value()));
                     }
                     catch (const std::exception& ex)
                     {
                         LOG_ERROR << ex.what();
 
-                        db_conn->delete_file(unzipped_file_id_and_path_opt->first);
+                        db_conn->delete_file(std::get<0>(unzipped_file_data_opt.value()));
 
                         break;
                     }
 
                     // Add unzipped file to the list to recode it with others afterward
-                    file_ids_and_paths.insert(file_id_and_path_it, unzipped_file_id_and_path_opt.value());
+                    files_data.insert(file_data_it, std::move(unzipped_file_data_opt.value()));
                 }
             }
             catch (const bit7z::BitException&)
@@ -513,7 +639,7 @@ void request_handlers::file_system::unzip_archives(
             // Remove the temporary archive folder from the file system
             try
             {
-                std::filesystem::remove_all(temp_archive_folder);
+                std::filesystem::remove_all(temp_archive_folder_path);
             }
             catch (const std::exception& ex)
             {
@@ -526,7 +652,7 @@ void request_handlers::file_system::unzip_archives(
             // Remove the archive from the file system
             try
             {
-                std::filesystem::remove(file_id_and_path_it->second);
+                std::filesystem::remove(std::get<1>(*file_data_it));
             }
             catch (const std::exception& ex)
             {
@@ -534,32 +660,92 @@ void request_handlers::file_system::unzip_archives(
             }
             
             // Delete the archive from the database
-            db_conn->delete_file(file_id_and_path_it->first);
+            db_conn->delete_file(std::get<0>(*file_data_it));
 
-            ++file_id_and_path_it;
+            ++file_data_it;
             // Delete the archive from the list of files to be recoded afterward
-            file_ids_and_paths.erase(std::prev(file_id_and_path_it));
+            files_data.erase(std::prev(file_data_it));
         }
         else
         {
-            ++file_id_and_path_it;
+            ++file_data_it;
+        }
+    }
+}
+
+void request_handlers::file_system::convert_files_to_csv(
+    std::list<std::tuple<size_t, std::filesystem::path, std::string>>& files_data,
+    database_connection_wrapper& db_conn)
+{
+    for (auto& file_data : files_data)
+    {
+        // Convert files with all extensions except csv
+        if (std::get<2>(file_data) == "csv")
+        {
+            continue;
+        }
+    
+        db_conn->change_file_status(std::get<0>(file_data), file_status::converting);
+        
+        // Converted csv file will have the same path except csv extension
+        std::filesystem::path new_file_path = std::get<1>(file_data);
+        new_file_path.replace_extension("csv");
+
+        // Try to convert file to csv
+        // If successful then change file extension and status 
+        // otherwise remove file from the database and filesystem 
+        if (file_types_conversion::convert_file_to_csv(
+            std::get<2>(file_data), 
+            std::get<1>(file_data), 
+            new_file_path))
+        {
+            size_t new_file_size;
+
+            try
+            {
+                new_file_size = std::filesystem::file_size(new_file_path);
+            }
+            catch (const std::exception& ex)
+            {
+                LOG_ERROR << ex.what();
+            }
+            
+            db_conn->update_converted_file(std::get<0>(file_data), "csv", new_file_path.c_str(), new_file_size);
+
+            db_conn->change_file_status(std::get<0>(file_data), file_status::ready_for_parsing);
+        }
+        else
+        {
+            try
+            {
+                std::filesystem::remove(std::get<1>(file_data));
+            }
+            catch (const std::exception& ex)
+            {
+                LOG_ERROR << ex.what();
+            }
+            
+            db_conn->delete_file(std::get<0>(file_data));
         }
     }
 }
 
 void request_handlers::file_system::process_uploaded_files(
-    std::list<std::pair<size_t, std::string>>&& file_ids_and_paths,
+    std::list<std::tuple<size_t, std::filesystem::path, std::string>>&& files_data,
     size_t user_id,
     size_t folder_id,
     database_connection_wrapper&& db_conn)
 {
-    // Unzip all the archives to get actual files instead of them
-    unzip_archives(file_ids_and_paths, user_id, folder_id, db_conn);
+    // Unzip all the archives to get actual files
+    unzip_archives(files_data, user_id, folder_id, db_conn);
 
-    for (auto file_id_and_path : file_ids_and_paths)
-    {
-        db_conn->change_file_status(file_id_and_path.first, file_status::ready_for_parsing);
-    }
+    // Convert xlsx, sql and txt files to csv
+    convert_files_to_csv(files_data, db_conn);
+
+    // for (auto& file_data : files_data)
+    // {
+    //     db_conn->change_file_status(std::get<0>(file_data), file_status::ready_for_parsing);
+    // }
 }
 
 void request_handlers::file_system::delete_files(const request_params& request, response_params& response)
