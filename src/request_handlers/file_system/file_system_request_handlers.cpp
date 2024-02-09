@@ -66,7 +66,7 @@ void request_handlers::file_system::get_file_rows_number(const request_params& r
             "Internal server error occured");
     }
 
-    // File with given if doesn't exist
+    // File with given id doesn't exist
     if (file_path_opt.value() == "")
     {
         return prepare_error_response(
@@ -77,13 +77,13 @@ void request_handlers::file_system::get_file_rows_number(const request_params& r
 
     size_t file_rows_number = file_preview::get_file_rows_number(file_path_opt.value());
 
-    // An error occured with file
-    if (file_rows_number == -1)
+    // File was just deleted
+    if (file_rows_number == static_cast<size_t>(-1))
     {
         return prepare_error_response(
             response,
-            http::status::internal_server_error, 
-            "Internal server error occured");
+            http::status::not_found, 
+            "File was not found");
     }
 
     response.body = json::serialize(
@@ -146,7 +146,7 @@ void request_handlers::file_system::get_file_raw_rows(const request_params& requ
             "Internal server error occured");
     }
 
-    // File with given if doesn't exist
+    // File with given id doesn't exist
     if (file_path_opt.value() == "")
     {
         return prepare_error_response(
@@ -155,18 +155,41 @@ void request_handlers::file_system::get_file_raw_rows(const request_params& requ
             "File was not found");
     }
 
-    json::array file_rows = file_preview::get_file_raw_rows(file_path_opt.value(), from_row_number, rows_number);
+    std::pair<uint8_t, json::array> file_rows = 
+        file_preview::get_file_raw_rows(file_path_opt.value(), from_row_number, rows_number);
 
-    // An error occured with file
-    if (file_rows.empty())
+    // An error occured while processing the raw rows
+    if (file_rows.first)
     {
-        return prepare_error_response(
-            response,
-            http::status::unprocessable_entity, 
-            "Invalid row parameters");
+        // Desired file contains too large data to preview 
+        if (file_rows.first == 3)
+        {
+            return prepare_error_response(
+                response,
+                http::status::unprocessable_entity, 
+                "Too large data to preview");
+        }
+
+        // Invalid row parameters were provided
+        if (file_rows.first == 2)
+        {
+            return prepare_error_response(
+                response,
+                http::status::unprocessable_entity, 
+                "Invalid row parameters");
+        }
+
+        // File was just deleted
+        if (file_rows.first == 1)
+        {
+            return prepare_error_response(
+                response,
+                http::status::not_found, 
+                "File was not found");
+        }
     }
 
-    response.body = json::serialize(file_rows);
+    response.body = json::serialize(file_rows.second);
 }
 
 void request_handlers::file_system::create_folder(const request_params& request, response_params& response)

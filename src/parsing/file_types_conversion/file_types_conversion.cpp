@@ -50,23 +50,46 @@ bool file_types_conversion::convert_xlsx_to_csv(
 {
     // Create a pipe stream to get the error output in it
     boost::process::ipstream pipe_stream;
+    int error_code;
     
-    // Run the command to convert xlsx format to csv by in2csv terminal tool
-    // Override standard output to csv file 
-    // Override error output to pipe stream 
-    int error_code = boost::process::system(
-        std::format(
-            "in2csv \"{}\"", 
-            xlsx_file_path.c_str()),
-        boost::process::std_out > csv_file_path.c_str(),
-        boost::process::std_err > pipe_stream);
+    try
+    {
+        // Run the command to convert xlsx format to csv by in2csv terminal tool
+        // Override standard output to csv file 
+        // Override error output to pipe stream 
+        error_code = boost::process::system(
+            std::format(
+                "in2csv \"{}\"", 
+                xlsx_file_path.c_str()),
+            boost::process::std_out > csv_file_path.c_str(),
+            boost::process::std_err > pipe_stream);
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_ERROR << std::format(
+            "Could not convert '{}' to csv format:\n{}", 
+            xlsx_file_path.c_str(),
+            ex.what());
 
+        // We have to remove just created csv file because it is useless now
+        try
+        {
+            std::filesystem::remove(csv_file_path);
+        }
+        catch (const std::exception& ex)
+        {
+            LOG_ERROR << ex.what();
+        }
+        
+        return false;
+    }
+    
     // If the command returned non zero code then the error occured
     if (error_code) 
     {
         // Get the pipe stream data - error message and log it
         LOG_ERROR << std::format(
-            "Could not convert {} to csv format:\n{}", 
+            "Could not convert '{}' to csv format:\n{}", 
             xlsx_file_path.c_str(),
             std::string{std::istreambuf_iterator<char>(pipe_stream), std::istreambuf_iterator<char>()});
 
