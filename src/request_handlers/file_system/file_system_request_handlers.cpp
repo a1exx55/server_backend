@@ -705,6 +705,8 @@ void request_handlers::file_system::convert_files_to_csv(
         // Convert files with all extensions except csv
         if (std::get<2>(file_data) == "csv")
         {
+            db_conn->change_file_status(std::get<0>(file_data), file_status::ready_for_parsing);
+            
             continue;
         }
     
