@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <format>
 #include <array>
+#include <initializer_list>
 
 #include <unicode/unistr.h>
 #include <boost/regex.hpp>
@@ -53,8 +54,10 @@
 #include <logging/logger.hpp>
 // #include <network/listener.hpp>
 #include <network/ssl_certificate_loading.hpp>
-#include <jwt_utils/jwt_utils.hpp>
-#include <cookie_utils/cookie_utils.hpp>
+#include <utils/jwt_utils/jwt_utils.hpp>
+#include <utils/cookie_utils/cookie_utils.hpp>
+#include <utils/http_utils/http_endpoints_storage.hpp>
+#include <utils/http_utils/uri.hpp>
 #include <network/request_and_response_params.hpp>
 
 #endif

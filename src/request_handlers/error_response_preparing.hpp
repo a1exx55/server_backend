@@ -7,10 +7,10 @@ namespace request_handlers
 {
     inline void prepare_error_response(
         response_params& response,
-        boost::beast::http::status error_status,
+        boost::beast::http::status status,
         std::string_view error_message)
     {
-        response.error_status = error_status;
+        response.status = status;
         response.body = json::serialize(
             json::object
             {

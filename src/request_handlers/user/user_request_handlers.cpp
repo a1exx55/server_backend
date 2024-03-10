@@ -256,7 +256,7 @@ void request_handlers::user::close_session(const request_params& request, respon
 {
     size_t session_id;
 
-    if (!uri_params::get_path_parameter(request.uri, session_id))
+    if (!http_utils::uri::get_path_parameter(request.uri, request.uri_template, "sessionId", session_id))
     {
         return prepare_error_response(
             response, 

@@ -1,4 +1,4 @@
-#include <jwt_utils/jwt_utils.hpp>
+#include <utils/jwt_utils/jwt_utils.hpp>
 
 std::pair<std::string, std::string> jwt_utils::create_tokens(const json::object& custom_claims)
 {

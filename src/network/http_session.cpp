@@ -20,77 +20,75 @@ http_session::http_session(tcp::socket&& socket, ssl::context& ssl_context)
     _response.set(http::field::access_control_allow_headers, "Content-Type, Authorization");
 }
 
-const std::unordered_map<
-    std::tuple<std::string_view, http::verb, uri_params::type>, 
-    std::tuple<bool, jwt_token_type, const request_handler_t>, 
-    boost::hash<std::tuple<std::string_view, http::verb, uri_params::type>>> http_session::_requests_metadata
+const http_utils::http_endpoints_storage
+    <std::tuple<bool, jwt_token_type, request_handler_t>> http_session::_endpoints
 {
     {
-        {"/api/user/login", http::verb::post, uri_params::type::no},
+        "/api/user/login", http::verb::post,
         {true, jwt_token_type::no, request_handlers::user::login}
     },
     {
-        {"/api/user/logout", http::verb::post, uri_params::type::no},
+        "/api/user/logout", http::verb::post,
         {false, jwt_token_type::refresh_token, request_handlers::user::logout}
     },
     {
-        {"/api/user/tokens", http::verb::put, uri_params::type::no},
+        "/api/user/tokens", http::verb::put,
         {false, jwt_token_type::refresh_token, request_handlers::user::refresh_tokens}
     },
     {
-        {"/api/user/sessions", http::verb::get, uri_params::type::no},
+        "/api/user/sessions", http::verb::get,
         {false, jwt_token_type::refresh_token, request_handlers::user::get_sessions_info}
     },
     {
-        {"/api/user/sessions", http::verb::delete_, uri_params::type::path},
+        "/api/user/sessions/{sessionId}", http::verb::delete_,
         {false, jwt_token_type::access_token, request_handlers::user::close_session}
     },
     {
-        {"/api/user/sessions", http::verb::delete_, uri_params::type::no},
+        "/api/user/sessions", http::verb::delete_,
         {false, jwt_token_type::refresh_token, request_handlers::user::close_all_sessions_except_current}
     },
     {
-        {"/api/user/password", http::verb::put, uri_params::type::no},
+        "/api/user/password", http::verb::put,
         {true, jwt_token_type::refresh_token, request_handlers::user::change_password}
     },
     {
-        {"/api/file_system/folders", http::verb::get, uri_params::type::no},
+        "/api/file_system/folders", http::verb::get,
         {false, jwt_token_type::access_token, request_handlers::file_system::get_folders_info}
     },
     {
-        {"/api/file_system/folders", http::verb::post, uri_params::type::no},
+        "/api/file_system/folders", http::verb::post,
         {true, jwt_token_type::access_token, request_handlers::file_system::create_folder}
     },
     {
-        {"/api/file_system/folders", http::verb::delete_, uri_params::type::query},
+        "/api/file_system/folders", http::verb::delete_,
         {false, jwt_token_type::access_token, request_handlers::file_system::delete_folders}
     },
     {
-        {"/api/file_system/folders", http::verb::patch, uri_params::type::path},
+        "/api/file_system/folders/{folderId}", http::verb::patch,
         {true, jwt_token_type::access_token, request_handlers::file_system::rename_folder}
     },
     {
-        {"/api/file_system/files", http::verb::get, uri_params::type::query},
+        "/api/file_system/files", http::verb::get,
         {false, jwt_token_type::access_token, request_handlers::file_system::get_files_info}
     },
     {
-        {"/api/file_system/file_rows_number", http::verb::get, uri_params::type::path},
+        "/api/file_system/files/{fileId}/rows_number", http::verb::get,
         {false, jwt_token_type::access_token, request_handlers::file_system::get_file_rows_number}
     },
     {
-        {"/api/file_system/files", http::verb::get, uri_params::type::path_and_query},
+        "/api/file_system/files/{fileId}/preview/raw", http::verb::get,
         {false, jwt_token_type::access_token, request_handlers::file_system::get_file_raw_rows}
     },
     {
-        {"/api/file_system/files", http::verb::post, uri_params::type::query},
+        "/api/file_system/files", http::verb::post,
         {true, jwt_token_type::access_token, [](const request_params&, response_params&){}}
     },
     {
-        {"/api/file_system/files", http::verb::delete_, uri_params::type::query},
+        "/api/file_system/files", http::verb::delete_,
         {false, jwt_token_type::access_token, request_handlers::file_system::delete_files}
     },
     {
-        {"/api/file_system/files", http::verb::patch, uri_params::type::path},
+        "/api/file_system/files/{fileId}", http::verb::patch,
         {true, jwt_token_type::access_token, request_handlers::file_system::rename_file}
     }
 };
@@ -209,24 +207,19 @@ void http_session::on_read_header(beast::error_code error_code, std::size_t byte
         return do_write_response(true);
     }
 
-    // Determine the handler to invoke by request metadata
-    // or construct error response if didn't found corresponding request
-    if (auto request_metadata = _requests_metadata.find(
-        {
-            uri_params::get_unparameterized_uri(_request_parser->get().target()), 
-            _request_parser->get().method(),
-            uri_params::determine_uri_parameters_type(_request_parser->get().target())
-        }); 
-        request_metadata != _requests_metadata.end())
+    // Search for the endpoint by received request's uri and method and get its data
+    // or construct error response if didn't found corresponding endpoint
+    if (auto endpoint = _endpoints.find_endpoint(
+            _request_parser->get().target(), 
+            _request_parser->get().method()); 
+        !endpoint.uri_template.empty())
     {
         // Determine if the request is for uploading files as it has to be processed separately
         bool is_uploading_files_request = 
-            request_metadata->first == 
-                std::tuple<std::string_view, http::verb, uri_params::type>{
-                    "/api/file_system/files", http::verb::post, uri_params::type::query};
+            endpoint.uri_template == "/api/file_system/files" && endpoint.method == http::verb::post;
 
         // Check if the request attributes meets the requirements depending on the expected body presence
-        if (!validate_request_attributes(std::get<0>(request_metadata->second), is_uploading_files_request))
+        if (!validate_request_attributes(std::get<0>(endpoint.metadata), is_uploading_files_request))
         {
             return do_write_response(false);
         }
@@ -234,14 +227,16 @@ void http_session::on_read_header(beast::error_code error_code, std::size_t byte
         // Parse request to get necessary http params in _request_params and use it in request handler
         parse_request_params();
 
+        _request_params.uri_template = endpoint.uri_template;
+
         // Validate jwt token(access or refresh) with the presence
-        if (!validate_jwt_token(std::get<1>(request_metadata->second)))
+        if (!validate_jwt_token(std::get<1>(endpoint.metadata)))
         {
             return do_write_response(false);
         }
 
         // Read the body with the presence and invoke request handler
-        if (std::get<0>(request_metadata->second))
+        if (std::get<0>(endpoint.metadata))
         {
             // Process uploading files separately because it is not synchronous as other handlers 
             if (is_uploading_files_request)
@@ -249,12 +244,12 @@ void http_session::on_read_header(beast::error_code error_code, std::size_t byte
                 return upload_files();
             }
 
-            do_read_body(std::get<2>(request_metadata->second));
+            do_read_body(std::get<2>(endpoint.metadata));
         }
         else
         {
             // Invoke request handler to process corresponding request logic
-            std::get<2>(request_metadata->second)(_request_params, _response_params);
+            std::get<2>(endpoint.metadata)(_request_params, _response_params);
 
             // Parse reponse params to set all of the necessary fields in the _response
             parse_response_params();
@@ -265,9 +260,9 @@ void http_session::on_read_header(beast::error_code error_code, std::size_t byte
     else
     {
         prepare_error_response(
-            http::status::not_found, 
+            http::status::not_acceptable, 
             "URI " + std::string(_request_parser->get().target()) + " with method " + 
-                std::string(http::to_string(_request_parser->get().method())) + " was not found");
+                std::string(http::to_string(_request_parser->get().method())) + " can't be processed");
         do_write_response(false);
     }
 }
@@ -396,11 +391,13 @@ void http_session::parse_request_params()
     _request_params.user_agent = _request_parser->get()[http::field::user_agent];
     _request_params.user_ip = _request_parser->get()["X-Forwarded-For"];
 
+    _request_params.access_token = _request_parser->get()[http::field::authorization];
+
     // Get access token from the Authorization field in the http header in the format of "Bearer <token>"
-    // so access token are less than the length 8 can't be at all(don't try to predict access token length) 
-    if (_request_parser->get()[http::field::authorization].size() >= 8) 
+    // so access token are less than the length 8 can't be at all
+    if (_request_params.access_token.size() >= 8) 
     {
-        _request_params.access_token = _request_parser->get()[http::field::authorization].substr(7);    
+        _request_params.access_token = _request_params.access_token.substr(7);    
     }
 
     // Get the refresh token from the Cookie field in the http header 
@@ -418,15 +415,7 @@ void http_session::parse_request_params()
 
 void http_session::parse_response_params()
 {
-    // If error status is unknown then request was successfully handled and the status has to be OK(200)  
-    if (_response_params.error_status == http::status::unknown)
-    {
-        _response.result(http::status::ok);
-    }
-    else
-    {
-        _response.result(_response_params.error_status);
-    }
+    _response.result(_response_params.status);
 
     // If refresh token is not empty then set cookies with refreshToken and rememberMe fields respectively
     if (_response_params.refresh_token != "")
@@ -541,7 +530,7 @@ void http_session::upload_files()
 {
     size_t folder_id;
 
-    if (!uri_params::get_query_parameters(_request_parser->get().target(), "folderId", folder_id))
+    if (!http_utils::uri::get_query_parameter(_request_parser->get().target(), "folderId", folder_id))
     {
         prepare_error_response(
             http::status::unprocessable_entity, 

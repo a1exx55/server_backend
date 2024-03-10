@@ -25,14 +25,15 @@ set(SRC
 	src/database/database_connections_pool.cpp
 	src/network/listener.cpp
 	src/network/http_session.cpp
-	src/network/uri_params.cpp
-	src/jwt_utils/jwt_utils.cpp
-	src/cookie_utils/cookie_utils.cpp
-	# src/request_handlers/request_handlers.cpp
+	# src/network/http_route_utils/http_route_templates_storage.cpp
+	src/utils/jwt_utils/jwt_utils.cpp
+	src/utils/cookie_utils/cookie_utils.cpp
+	src/utils/http_utils/uri.cpp
 	src/request_handlers/user/user_request_handlers.cpp
 	src/request_handlers/file_system/file_system_request_handlers.cpp
 	src/parsing/file_types_conversion/file_types_conversion.cpp
 	src/parsing/file_preview/file_preview.cpp
+	src/parsing/file_normalization/file_normalization.cpp
 	# src/parsing/validation/validation.cpp
 	# src/parsing/validation/normalization.cpp
 	)

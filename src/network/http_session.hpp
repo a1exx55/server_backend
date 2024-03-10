@@ -4,10 +4,11 @@
 //local
 #include <logging/logger.hpp>
 #include <config.hpp>
-#include <jwt_utils/jwt_utils.hpp>
+#include <utils/jwt_utils/jwt_utils.hpp>
 #include <request_handlers/request_handlers.hpp>
 #include <network/request_and_response_params.hpp>
-#include <network/uri_params.hpp>
+#include <utils/http_utils/uri.hpp>
+#include <utils/http_utils/http_endpoints_storage.hpp>
 
 //internal
 #include <fstream>
@@ -78,8 +79,8 @@ class http_session : public std::enable_shared_from_this<http_session>
 
         void parse_response_params();
 
-        // Handle unexpected request attributes depending on the body present 
-        // and if the request is for downloading files
+        // Handle unexpected request attributes depending on the body presence 
+        // and if the request is for uploading files
         bool validate_request_attributes(bool has_body, bool is_downloading_files_request);
       
         // Validate jwt token depending on its type
@@ -121,11 +122,9 @@ class http_session : public std::enable_shared_from_this<http_session>
         request_params _request_params;
         response_params _response_params;
         
-        // This map is used to determine what request handler to invoke depending on the request params
-        static const std::unordered_map<
-            std::tuple<std::string_view, http::verb, uri_params::type>, 
-            std::tuple<bool, jwt_token_type, const request_handler_t>, 
-            boost::hash<std::tuple<std::string_view, http::verb, uri_params::type>>> _requests_metadata;
+        // Storage of http endpoints data to perform fast search of endpoints even with path parameters 
+        static const http_utils::http_endpoints_storage
+            <std::tuple<bool, jwt_token_type, request_handler_t>> _endpoints;
 }; 
 
 #endif

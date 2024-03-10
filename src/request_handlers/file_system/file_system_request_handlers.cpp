@@ -35,7 +35,7 @@ void request_handlers::file_system::get_file_rows_number(const request_params& r
 {
     size_t file_id;
 
-    if (!uri_params::get_path_parameter(request.uri, file_id))
+    if (!http_utils::uri::get_path_parameter(request.uri, request.uri_template, "fileId", file_id))
     {
         return prepare_error_response(
             response,
@@ -97,7 +97,7 @@ void request_handlers::file_system::get_file_raw_rows(const request_params& requ
 {
     size_t file_id;
 
-    if (!uri_params::get_path_parameter(request.uri, file_id))
+    if (!http_utils::uri::get_path_parameter(request.uri, request.uri_template, "fileId", file_id))
     {
         return prepare_error_response(
             response,
@@ -107,7 +107,7 @@ void request_handlers::file_system::get_file_raw_rows(const request_params& requ
 
     size_t from_row_number, rows_number;
 
-    if (!uri_params::get_query_parameters(request.uri, "fromRowNumber", from_row_number))
+    if (!http_utils::uri::get_query_parameter(request.uri, "fromRowNumber", from_row_number))
     {
         return prepare_error_response(
             response,
@@ -115,7 +115,7 @@ void request_handlers::file_system::get_file_raw_rows(const request_params& requ
             "Invalid row parameters");
     }
 
-    if (!uri_params::get_query_parameters(request.uri, "rowsNumber", rows_number))
+    if (!http_utils::uri::get_query_parameter(request.uri, "rowsNumber", rows_number))
     {
         return prepare_error_response(
             response,
@@ -300,7 +300,7 @@ void request_handlers::file_system::delete_folders(const request_params& request
 {
     std::vector<size_t> folder_ids;
 
-    if (!uri_params::get_query_parameters(request.uri, "folderIds", folder_ids))
+    if (!http_utils::uri::get_query_parameter(request.uri, "folderIds", folder_ids))
     {
         return prepare_error_response(
             response,
@@ -353,7 +353,7 @@ void request_handlers::file_system::delete_folders(const request_params& request
     // Not all folders were deleted
     if (deleted_folders_data_opt->first.size() != folder_ids.size())
     {
-        response.error_status = http::status::unprocessable_entity;
+        response.status = http::status::unprocessable_entity;
         response.body = json::serialize(
             json::object
             {
@@ -371,7 +371,7 @@ void request_handlers::file_system::rename_folder(const request_params& request,
     {
         size_t folder_id;
 
-        if (!uri_params::get_path_parameter(request.uri, folder_id))
+        if (!http_utils::uri::get_path_parameter(request.uri, request.uri_template, "folderId", folder_id))
         {
             return prepare_error_response(
                 response, 
@@ -463,7 +463,7 @@ void request_handlers::file_system::get_files_info(const request_params& request
 {
     size_t folder_id;
 
-    if (!uri_params::get_query_parameters(request.uri, "folderId", folder_id))
+    if (!http_utils::uri::get_query_parameter(request.uri, "folderId", folder_id))
     {
         return prepare_error_response(
             response,
@@ -712,7 +712,7 @@ void request_handlers::file_system::convert_files_to_csv(
     
         db_conn->change_file_status(std::get<0>(file_data), file_status::converting);
         
-        // Converted csv file will have the same path except csv extension
+        // Converted csv file will have the same path but csv extension
         std::filesystem::path new_file_path = std::get<1>(file_data);
         new_file_path.replace_extension("csv");
 
@@ -777,7 +777,7 @@ void request_handlers::file_system::delete_files(const request_params& request, 
 {
     std::vector<size_t> file_ids;
 
-    if (!uri_params::get_query_parameters(request.uri, "fileIds", file_ids))
+    if (!http_utils::uri::get_query_parameter(request.uri, "fileIds", file_ids))
     {
         return prepare_error_response(
             response,
@@ -830,7 +830,7 @@ void request_handlers::file_system::delete_files(const request_params& request, 
     // Not all files were deleted
     if (deleted_files_data_opt->first.size() != file_ids.size())
     {
-        response.error_status = http::status::unprocessable_entity;
+        response.status = http::status::unprocessable_entity;
         response.body = json::serialize(
             json::object
             {
@@ -848,7 +848,7 @@ void request_handlers::file_system::rename_file(const request_params& request, r
     {
         size_t file_id;
 
-        if (!uri_params::get_path_parameter(request.uri, file_id))
+        if (!http_utils::uri::get_path_parameter(request.uri, request.uri_template, "fileId", file_id))
         {
             return prepare_error_response(
                 response, 

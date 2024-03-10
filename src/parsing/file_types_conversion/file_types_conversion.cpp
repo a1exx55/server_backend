@@ -387,7 +387,7 @@ bool file_types_conversion::convert_sql_to_csv(
         }
 
         // We assume that each row has to be less than 2000 bytes 
-        // so if it is left less in buffer then move the remainder to the beginning and read 1 MB again 
+        // so if it is left less in buffer then move the remainder to the beginning and read up to 1 MB again 
         if (BUFFER_SIZE - start_position < 2000)
         {
             std::move(buffer.begin() + start_position, buffer.end(), buffer.begin());

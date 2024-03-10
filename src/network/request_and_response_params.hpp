@@ -8,6 +8,7 @@
 struct request_params
 {
     std::string_view uri{};
+    std::string_view uri_template{};
     std::string user_ip{};
     std::string_view user_agent{};
     std::string_view access_token{};
@@ -18,7 +19,7 @@ struct request_params
 
 struct response_params
 {
-    boost::beast::http::status error_status{};
+    boost::beast::http::status status{};
     std::string refresh_token{};
     bool remember_me{};
     std::chrono::seconds max_age{};
@@ -26,7 +27,7 @@ struct response_params
 
     void init_params()
     {
-        error_status = boost::beast::http::status::unknown;
+        status = boost::beast::http::status::ok;
         std::string refresh_token = {};
         bool remember_me = {};
         std::chrono::seconds max_age = {};

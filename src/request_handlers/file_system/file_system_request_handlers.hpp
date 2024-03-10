@@ -6,7 +6,7 @@
 #include <config.hpp>
 #include <database/database_connections_pool.hpp>
 #include <network/request_and_response_params.hpp>
-#include <network/uri_params.hpp>
+#include <utils/http_utils/uri.hpp>
 #include <parsing/file_types_conversion/file_types_conversion.hpp>
 #include <parsing/file_preview/file_preview.hpp>
 
