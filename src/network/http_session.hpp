@@ -94,7 +94,7 @@ class http_session : public std::enable_shared_from_this<http_session>
             size_t user_id,
             size_t folder_id,
             std::ofstream&& file,
-            database_connection_wrapper&& db, 
+            database_connection_wrapper<file_system_database_connection>&& db, 
             std::list<std::tuple<size_t, std::filesystem::path, std::string>>&& file_paths,
             beast::error_code error_code, std::size_t bytes_transferred);
 
@@ -104,7 +104,7 @@ class http_session : public std::enable_shared_from_this<http_session>
             size_t user_id,
             size_t folder_id,
             std::ofstream&& file,
-            database_connection_wrapper&& db_conn, 
+            database_connection_wrapper<file_system_database_connection>&& db_conn, 
             std::list<std::tuple<size_t, std::filesystem::path, std::string>>&& file_paths,
             beast::error_code error_code, std::size_t bytes_transferred);
 

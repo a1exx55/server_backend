@@ -3,9 +3,11 @@
 
 //local
 #include <utils/http_utils/uri.hpp>
+#include <boost/beast/http/verb.hpp>
 
 //internal
 #include <initializer_list>
+#include <unordered_map>
 
 namespace http_utils
 {
@@ -54,32 +56,17 @@ namespace http_utils
                         // Segment is constant
                         else
                         {
-                            auto found_segment = std::find_if(
-                                current_path_segment->next_constant_path_segments.begin(),
-                                current_path_segment->next_constant_path_segments.end(),
-                                [&path_segment](std::pair<std::string, http_uri_path_segment<T>*>& segment)
-                                {
-                                    return segment.first == path_segment;
-                                });
-
-                            // Path segment was not found
-                            if (found_segment == current_path_segment->next_constant_path_segments.end())
-                            {
-                                current_path_segment = 
-                                    current_path_segment->next_constant_path_segments.emplace_back(
-                                        std::string{path_segment}, 
-                                        new http_uri_path_segment<T>{})
-                                    .second;
-                            }
-                            else
-                            {
-                                current_path_segment = found_segment->second;
-                            }
+                            // Insert new segment if there is no already and move to it
+                            current_path_segment = 
+                                current_path_segment->next_constant_path_segments.try_emplace(
+                                    std::string{path_segment}, 
+                                    new http_uri_path_segment<T>{})
+                                .first->second;
                         }
                     }
 
-                    // Assign endpoint data to the last segment of uri
-                    current_path_segment->endpoint = endpoint;
+                    // Insert endpoint data to the last segment of uri
+                    current_path_segment->endpoints.try_emplace(endpoint.method, endpoint);
                 }
             }
 
@@ -102,13 +89,8 @@ namespace http_utils
                 for (auto path_segment : uri::get_path_segments(uri))
                 {
                     // Firstly try to find path segment among constant segments
-                    auto found_segment = std::find_if(
-                        current_path_segment->next_constant_path_segments.begin(),
-                        current_path_segment->next_constant_path_segments.end(),
-                        [&path_segment](std::pair<std::string, http_uri_path_segment<T>*>& segment)
-                        {
-                            return segment.first == path_segment;
-                        });
+                    auto found_segment = 
+                        current_path_segment->next_constant_path_segments.find(std::string{path_segment});
 
                     // If it is not constant segment then it can be only path parameter
                     if (found_segment == current_path_segment->next_constant_path_segments.end())
@@ -128,14 +110,17 @@ namespace http_utils
                     }
                 }
 
-                // After getting to the last path segment compare its method with the given one
-                if (current_path_segment->endpoint.method == method)
+                // After getting to the last path segment find endpoint by given method
+                auto found_endpoint = current_path_segment->endpoints.find(method);
+
+                // No endpoint with given method
+                if (found_endpoint == current_path_segment->endpoints.end())
                 {
-                    return current_path_segment->endpoint;
+                    return {};
                 }
                 else
                 {
-                    return {};
+                    return found_endpoint->second;
                 }
             }
 
@@ -143,9 +128,9 @@ namespace http_utils
             template <typename U>
             struct http_uri_path_segment
             {
-                http_endpoint<U> endpoint{};
+                std::unordered_map<boost::beast::http::verb, http_endpoint<U>> endpoints{};
 
-                std::vector<std::pair<std::string, http_uri_path_segment<U>*>> next_constant_path_segments{};
+                std::unordered_map<std::string, http_uri_path_segment<U>*> next_constant_path_segments{};
                 http_uri_path_segment<U>* next_path_parameter{};
             };
         

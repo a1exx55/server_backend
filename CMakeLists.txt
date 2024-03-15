@@ -21,8 +21,9 @@ find_package(OpenSSL REQUIRED)
 set(SRC 
 	src/main.cpp
 	src/logging/logger.cpp
-	src/database/database_connection.cpp
-	src/database/database_connections_pool.cpp
+	# src/database/database_connections_pool.cpp
+	src/database/user_database_connection/user_database_connection.cpp
+	src/database/file_system_database_connection/file_system_database_connection.cpp
 	src/network/listener.cpp
 	src/network/http_session.cpp
 	# src/network/http_route_utils/http_route_templates_storage.cpp

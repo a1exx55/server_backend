@@ -20,6 +20,7 @@
 #include <format>
 #include <array>
 #include <initializer_list>
+#include <type_traits>
 
 #include <unicode/unistr.h>
 #include <boost/regex.hpp>
@@ -53,6 +54,8 @@
 #include <config.hpp>
 #include <logging/logger.hpp>
 // #include <network/listener.hpp>
+#include <database/database_connection.hpp>
+#include <database/database_connections_pool.hpp>
 #include <network/ssl_certificate_loading.hpp>
 #include <utils/jwt_utils/jwt_utils.hpp>
 #include <utils/cookie_utils/cookie_utils.hpp>

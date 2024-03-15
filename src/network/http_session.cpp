@@ -538,7 +538,7 @@ void http_session::upload_files()
         return do_write_response(false);
     }
 
-    database_connection_wrapper db_conn = database_connections_pool::get();
+    auto db_conn = database_connections_pool::get<file_system_database_connection>();
 
     // No available connections
     if (!db_conn)
@@ -625,7 +625,7 @@ void http_session::upload_files()
                 size_t user_id,
                 size_t folder_id,
                 std::ofstream&& file, 
-                database_connection_wrapper&& db_conn,
+                database_connection_wrapper<file_system_database_connection>&& db_conn,
                 std::list<std::tuple<size_t, std::filesystem::path, std::string>>&& files_data,
                 beast::error_code error_code, std::size_t bytes_transferred)
             {
@@ -669,7 +669,7 @@ void http_session::process_uploading_file_header(
     size_t user_id,
     size_t folder_id,
     std::ofstream&& file,
-    database_connection_wrapper&& db_conn, 
+    database_connection_wrapper<file_system_database_connection>&& db_conn, 
     std::list<std::tuple<size_t, std::filesystem::path, std::string>>&& files_data,
     beast::error_code error_code, std::size_t bytes_transferred)
 {
@@ -896,7 +896,7 @@ void http_session::process_uploading_file_data(
     size_t user_id,
     size_t folder_id,
     std::ofstream&& file,
-    database_connection_wrapper&& db_conn, 
+    database_connection_wrapper<file_system_database_connection>&& db_conn, 
     std::list<std::tuple<size_t, std::filesystem::path, std::string>>&& files_data,
     beast::error_code error_code, std::size_t bytes_transferred)
 {

@@ -6,7 +6,7 @@ void request_handlers::user::login(const request_params& request, response_param
     {
         json::object body_json = json::parse(request.body).as_object();
 
-        database_connection_wrapper db_conn = database_connections_pool::get();
+        auto db_conn = database_connections_pool::get<user_database_connection>();
  
         // No available connections
         if (!db_conn)
@@ -97,7 +97,7 @@ void request_handlers::user::login(const request_params& request, response_param
 
 void request_handlers::user::logout(const request_params& request, response_params& response)
 {
-    database_connection_wrapper db_conn = database_connections_pool::get();
+    auto db_conn = database_connections_pool::get<user_database_connection>();
 
     // No available connections
     if (!db_conn)
@@ -142,7 +142,7 @@ void request_handlers::user::refresh_tokens(const request_params& request, respo
     // Create a new pair of access and refresh token respectively with the same token claims
     std::pair<std::string, std::string> tokens = jwt_utils::refresh_tokens(std::string{request.refresh_token});
 
-    database_connection_wrapper db_conn = database_connections_pool::get();
+    auto db_conn = database_connections_pool::get<user_database_connection>();
 
     // No available connections
     if (!db_conn)
@@ -209,7 +209,7 @@ void request_handlers::user::refresh_tokens(const request_params& request, respo
 
 void request_handlers::user::get_sessions_info(const request_params& request, response_params& response)
 {
-    database_connection_wrapper db_conn = database_connections_pool::get();
+    auto db_conn = database_connections_pool::get<user_database_connection>();
 
     // No available connections
     if (!db_conn)
@@ -264,7 +264,7 @@ void request_handlers::user::close_session(const request_params& request, respon
             "Invalid session id");
     }
 
-    database_connection_wrapper db_conn = database_connections_pool::get();
+    auto db_conn = database_connections_pool::get<user_database_connection>();
 
     // No available connections
     if (!db_conn)
@@ -304,7 +304,7 @@ void request_handlers::user::close_session(const request_params& request, respon
 
 void request_handlers::user::close_all_sessions_except_current(const request_params& request, response_params& response)
 {
-    database_connection_wrapper db_conn = database_connections_pool::get();
+    auto db_conn = database_connections_pool::get<user_database_connection>();
 
     // No available connections
     if (!db_conn)
@@ -369,7 +369,7 @@ void request_handlers::user::change_password(const request_params& request, resp
                 "Invalid new password format");
         }
 
-        database_connection_wrapper db_conn = database_connections_pool::get();
+        auto db_conn = database_connections_pool::get<user_database_connection>();
 
         // No available connections
         if (!db_conn)

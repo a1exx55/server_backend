@@ -4,7 +4,7 @@ void request_handlers::file_system::get_folders_info(
     [[maybe_unused]] const request_params& request, 
     response_params& response)
 {
-    database_connection_wrapper db_conn = database_connections_pool::get();
+    auto db_conn = database_connections_pool::get<file_system_database_connection>();
 
     // No available connections
     if (!db_conn)
@@ -43,7 +43,7 @@ void request_handlers::file_system::get_file_rows_number(const request_params& r
             "Invalid file id");
     }
 
-    database_connection_wrapper db_conn = database_connections_pool::get();
+    auto db_conn = database_connections_pool::get<file_system_database_connection>();
 
     // No available connections
     if (!db_conn)
@@ -123,7 +123,7 @@ void request_handlers::file_system::get_file_raw_rows(const request_params& requ
             "Invalid row parameters");
     }
 
-    database_connection_wrapper db_conn = database_connections_pool::get();
+    auto db_conn = database_connections_pool::get<file_system_database_connection>();
 
     // No available connections
     if (!db_conn)
@@ -213,7 +213,7 @@ void request_handlers::file_system::create_folder(const request_params& request,
                 "Invalid folder name format");
         }
 
-        database_connection_wrapper db_conn = database_connections_pool::get();
+        auto db_conn = database_connections_pool::get<file_system_database_connection>();
  
         // No available connections
         if (!db_conn)
@@ -308,7 +308,7 @@ void request_handlers::file_system::delete_folders(const request_params& request
             "Invalid folder ids");
     }
 
-    database_connection_wrapper db_conn = database_connections_pool::get();
+    auto db_conn = database_connections_pool::get<file_system_database_connection>();
 
     // No available connections
     if (!db_conn)
@@ -398,7 +398,7 @@ void request_handlers::file_system::rename_folder(const request_params& request,
                 "Invalid new folder name format");
         }
 
-        database_connection_wrapper db_conn = database_connections_pool::get();
+        auto db_conn = database_connections_pool::get<file_system_database_connection>();
 
         // No available connections
         if (!db_conn)
@@ -471,7 +471,7 @@ void request_handlers::file_system::get_files_info(const request_params& request
             "Invalid folder id");
     }
 
-    database_connection_wrapper db_conn = database_connections_pool::get();
+    auto db_conn = database_connections_pool::get<file_system_database_connection>();
 
     // No available connections
     if (!db_conn)
@@ -511,7 +511,7 @@ void request_handlers::file_system::unzip_archives(
     std::list<std::tuple<size_t, std::filesystem::path, std::string>>& files_data,
     size_t user_id,
     size_t folder_id,
-    database_connection_wrapper& db_conn)
+    database_connection_wrapper<file_system_database_connection>& db_conn)
 {
     for (auto file_data_it = files_data.cbegin(); file_data_it != files_data.cend();)
     {
@@ -698,7 +698,7 @@ void request_handlers::file_system::unzip_archives(
 
 void request_handlers::file_system::convert_files_to_csv(
     std::list<std::tuple<size_t, std::filesystem::path, std::string>>& files_data,
-    database_connection_wrapper& db_conn)
+    database_connection_wrapper<file_system_database_connection>& db_conn)
 {
     for (auto& file_data : files_data)
     {
@@ -759,7 +759,7 @@ void request_handlers::file_system::process_uploaded_files(
     std::list<std::tuple<size_t, std::filesystem::path, std::string>>&& files_data,
     size_t user_id,
     size_t folder_id,
-    database_connection_wrapper&& db_conn)
+    database_connection_wrapper<file_system_database_connection>&& db_conn)
 {
     // Unzip all the archives to get actual files
     unzip_archives(files_data, user_id, folder_id, db_conn);
@@ -785,7 +785,7 @@ void request_handlers::file_system::delete_files(const request_params& request, 
             "Invalid file ids");
     }
 
-    database_connection_wrapper db_conn = database_connections_pool::get();
+    auto db_conn = database_connections_pool::get<file_system_database_connection>();
 
     // No available connections
     if (!db_conn)
@@ -875,7 +875,7 @@ void request_handlers::file_system::rename_file(const request_params& request, r
                 "Invalid new file name format");
         }
 
-        database_connection_wrapper db_conn = database_connections_pool::get();
+        auto db_conn = database_connections_pool::get<file_system_database_connection>();
 
         // No available connections
         if (!db_conn)
