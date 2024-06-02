@@ -161,15 +161,6 @@ void request_handlers::file_system::get_file_raw_rows(const request_params& requ
     // An error occured while processing the raw rows
     if (file_rows.first)
     {
-        // Desired file contains too large data to preview 
-        if (file_rows.first == 3)
-        {
-            return prepare_error_response(
-                response,
-                http::status::unprocessable_entity, 
-                "Too large data to preview");
-        }
-
         // Invalid row parameters were provided
         if (file_rows.first == 2)
         {
@@ -507,240 +498,389 @@ void request_handlers::file_system::get_files_info(const request_params& request
     response.body = json::serialize(files_info_json_opt.value());
 }
 
-void request_handlers::file_system::unzip_archives(
+void request_handlers::file_system::process_unzipping_archive(
     std::list<std::tuple<size_t, std::filesystem::path, std::string>>& files_data,
+    std::list<std::tuple<size_t, std::filesystem::path, std::string>>::iterator file_data_it,
     size_t user_id,
     size_t folder_id,
     database_connection_wrapper<file_system_database_connection>& db_conn)
 {
-    for (auto file_data_it = files_data.cbegin(); file_data_it != files_data.cend();)
+    db_conn->change_file_status(std::get<0>(*file_data_it), file_status::unzipping);
+    
+    // Create temporary folder with unique name to extract the archive files into it
+    std::filesystem::path temp_archive_folder_path = 
+        std::get<1>(*file_data_it).parent_path() /
+        std::to_string(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+
+    try
     {
-        // Check if the file has one of the allowed archive extensions
-        if (config::ALLOWED_ARCHIVE_EXTENSIONS.contains(std::get<2>(*file_data_it)))
+        std::filesystem::create_directory(temp_archive_folder_path);
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_ERROR << ex.what();
+        return;
+    }
+
+    try
+    {
+        static bit7z::Bit7zLibrary lib_7zip{config::PATH_TO_7ZIP_LIB};
+        bit7z::BitArchiveReader archive_reader{lib_7zip, std::get<1>(*file_data_it)};
+        
+        // Don't retain archive structure to extract only files without nested folders
+        archive_reader.setRetainDirectories(false);
+
+        // Process all the archive files separately
+        for (const auto& archive_item : archive_reader.items())
         {
-            if (!db_conn->change_file_status(std::get<0>(*file_data_it), file_status::unzipping))
+            // Don't do anything with folders and files with invalid extensions 
+            if (archive_item.isDir() || 
+                !config::ALLOWED_PARSING_FILE_EXTENSIONS.contains(archive_item.extension()))
             {
                 continue;
             }
-            
-            // Create temporary folder with unique name to extract the archive files into it
-            std::filesystem::path temp_archive_folder_path = 
-                std::get<1>(*file_data_it).parent_path() /
-                std::to_string(std::chrono::high_resolution_clock::now().time_since_epoch().count());
 
-            try
-            {
-                std::filesystem::create_directory(temp_archive_folder_path);
-            }
-            catch (const std::exception& ex)
-            {
-                LOG_ERROR << ex.what();
-                continue;
-            }
+            // Unzip file to the prepared folder
+            archive_reader.extractTo(temp_archive_folder_path, {archive_item.index()});
 
-            try
-            {
-                static bit7z::Bit7zLibrary lib_7zip{config::PATH_TO_7ZIP_LIB};
-                bit7z::BitArchiveReader archive_reader{lib_7zip, std::get<1>(*file_data_it)};
-                
-                // Don't retain archive structure to extract only files without nested folders
-                archive_reader.setRetainDirectories(false);
+            // Get the file name without extension
+            std::string file_name = archive_item.name().erase(archive_item.name().find_last_of('.'));
+            std::optional<bool> does_file_exist_opt;
+            size_t opening_bracket, copy_number, non_digit_pos;
 
-                // Process all the archive files separately
-                for (const auto& archive_item : archive_reader.items())
+            // Check if the file with specified name exists in database
+            // If so we create names with copies by adding number after it: 
+            // test.txt -> test(1).txt -> test(2).txt until the modified name is available in database
+            while (true)    
+            {
+                does_file_exist_opt = db_conn->check_file_existence_by_name(folder_id, file_name);
+
+                if (!does_file_exist_opt.has_value())
                 {
-                    // Don't do anything with folders and files with invalid extensions 
-                    if (archive_item.isDir() || 
-                        !config::ALLOWED_PARSING_FILE_EXTENSIONS.contains(archive_item.extension()))
-                    {
-                        continue;
-                    }
+                    throw bit7z::BitException{"", std::error_code{}};
+                }
 
-                    // Unzip file to the prepared folder
-                    archive_reader.extractTo(temp_archive_folder_path, {archive_item.index()});
+                // We found the available file name so stop creating copies
+                if (!does_file_exist_opt.value())
+                {
+                    break;
+                }
 
-                    // Get the file name without extension
-                    std::string file_name = archive_item.name().erase(archive_item.name().find_last_of('.'));
-                    std::optional<bool> does_file_exist_opt;
-                    size_t opening_bracket, copy_number, non_digit_pos;
-
-                    // Check if the file with specified name exists in database
-                    // If so we create names with copies by adding number after it: 
-                    // test.txt -> test(1).txt -> test(2).txt until the modified name is available in database
-                    while (true)    
-                    {
-                        does_file_exist_opt = db_conn->check_file_existence_by_name(folder_id, file_name);
-
-                        if (!does_file_exist_opt.has_value())
-                        {
-                            throw bit7z::BitException{"", std::error_code{}};
-                        }
-
-                        // We found the available file name so stop creating copies
-                        if (!does_file_exist_opt.value())
-                        {
-                            break;
-                        }
-
-                        // If couldn't find opening and closing brackets then there is no copy yet
-                        // so just append '(1)' to the end of the file name
-                        if (file_name.back() == ')' && 
-                            (opening_bracket = file_name.rfind('(', file_name.size() - 2)) != std::string::npos)
-                        {
-                            try
-                            {
-                                // Try to consider data between opening and closing brackets as copy number
-                                copy_number = std::stoull(
-                                    file_name.substr(opening_bracket + 1, file_name.size() - opening_bracket - 2), 
-                                    &non_digit_pos);
-
-                                // Copy number string contains non digits after valid number
-                                if (non_digit_pos != 
-                                    file_name.substr(
-                                        opening_bracket + 1, file_name.size() - opening_bracket - 2).size())
-                                {
-                                    throw std::exception{};
-                                }
-
-                                // If copy number is valid then just increment it by one in the file name
-                                file_name.replace(
-                                    opening_bracket + 1, 
-                                    file_name.size() - opening_bracket - 2, 
-                                    std::to_string(copy_number + 1));
-                            }
-                            // If we got here then the copy number is not valid(e.g. the brackets don't represent 
-                            // the copy number but just are the part of the file name data - 'test(modified).txt') 
-                            // so just append the '(1)' to the end of the file name
-                            catch (const std::exception&)
-                            {
-                                file_name.append("(1)");
-                            }
-                        }
-                        else
-                        {
-                            file_name.append("(1)");
-                        }       
-                    }
-
-                    std::optional<std::tuple<size_t, std::filesystem::path, std::string>> unzipped_file_data_opt = 
-                        db_conn->insert_unzipped_file(
-                            user_id,
-                            folder_id,
-                            file_name,
-                            archive_item.extension(),
-                            archive_item.size());
-
-                    if (!unzipped_file_data_opt.has_value())
-                    {
-                        break;
-                    }
-
-                    // Rename unzipped file to the specific name got from the database
-                    // and move it out from the temporary folder
+                // If couldn't find opening and closing brackets then there is no copy yet
+                // so just append '(1)' to the end of the file name
+                if (file_name.back() == ')' && 
+                    (opening_bracket = file_name.rfind('(', file_name.size() - 2)) != std::string::npos)
+                {
                     try
                     {
-                        std::filesystem::rename(
-                            temp_archive_folder_path / archive_item.name(), 
-                            std::get<1>(unzipped_file_data_opt.value()));
+                        // Try to consider data between opening and closing brackets as copy number
+                        copy_number = std::stoull(
+                            file_name.substr(opening_bracket + 1, file_name.size() - opening_bracket - 2), 
+                            &non_digit_pos);
+
+                        // Copy number string contains non digits after valid number
+                        if (non_digit_pos != 
+                            file_name.substr(
+                                opening_bracket + 1, file_name.size() - opening_bracket - 2).size())
+                        {
+                            throw std::exception{};
+                        }
+
+                        // If copy number is valid then just increment it by one in the file name
+                        file_name.replace(
+                            opening_bracket + 1, 
+                            file_name.size() - opening_bracket - 2, 
+                            std::to_string(copy_number + 1));
                     }
-                    catch (const std::exception& ex)
+                    // If we got here then the copy number is not valid(e.g. the brackets don't represent 
+                    // the copy number but just are the part of the file name data - 'test(modified).txt') 
+                    // so just append the '(1)' to the end of the file name
+                    catch (const std::exception&)
                     {
-                        LOG_ERROR << ex.what();
-
-                        db_conn->delete_file(std::get<0>(unzipped_file_data_opt.value()));
-
-                        break;
+                        file_name.append("(1)");
                     }
-
-                    // Add unzipped file to the list to recode it with others afterward
-                    files_data.insert(file_data_it, std::move(unzipped_file_data_opt.value()));
                 }
+                else
+                {
+                    file_name.append("(1)");
+                }       
             }
-            catch (const bit7z::BitException&)
-            {}
-            
-            // Remove the temporary archive folder from the file system
+
+            std::optional<std::tuple<size_t, std::filesystem::path, std::string>> unzipped_file_data_opt = 
+                db_conn->insert_processed_file(
+                    user_id,
+                    folder_id,
+                    file_name,
+                    archive_item.extension(),
+                    archive_item.size(),
+                    file_status::uploaded);
+
+            if (!unzipped_file_data_opt.has_value())
+            {
+                break;
+            }
+
+            // Rename unzipped file to the specific name got from the database
+            // and move it out from the temporary folder
             try
             {
-                std::filesystem::remove_all(temp_archive_folder_path);
+                std::filesystem::rename(
+                    temp_archive_folder_path / archive_item.name(), 
+                    std::get<1>(unzipped_file_data_opt.value()));
             }
             catch (const std::exception& ex)
             {
                 LOG_ERROR << ex.what();
+
+                db_conn->delete_file(std::get<0>(unzipped_file_data_opt.value()));
+
+                break;
             }
 
-            // After processing an archive it has to be deleted because we don't need it anymore
-            // as we added unzipped files instead of it
-
-            // Remove the archive from the file system
-            try
-            {
-                std::filesystem::remove(std::get<1>(*file_data_it));
-            }
-            catch (const std::exception& ex)
-            {
-                LOG_ERROR << ex.what();
-            }
-            
-            // Delete the archive from the database
-            db_conn->delete_file(std::get<0>(*file_data_it));
-
-            ++file_data_it;
-            // Delete the archive from the list of files to be recoded afterward
-            files_data.erase(std::prev(file_data_it));
+            // Add unzipped file to the list to process it with others afterward
+            files_data.insert(std::next(file_data_it), std::move(unzipped_file_data_opt.value()));
         }
-        else
+    }
+    catch (const bit7z::BitException&)
+    {}
+    
+    // Remove the temporary archive folder from the file system
+    try
+    {
+        std::filesystem::remove_all(temp_archive_folder_path);
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_ERROR << ex.what();
+    }
+
+    // After processing an archive it has to be deleted because we don't need it anymore
+    // as we added unzipped files instead of it
+
+    // Delete the archive from the database
+    db_conn->delete_file(std::get<0>(*file_data_it));
+
+    // Remove the archive from the file system
+    try
+    {
+        std::filesystem::remove(std::get<1>(*file_data_it));
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_ERROR << ex.what();
+    } 
+}
+
+bool request_handlers::file_system::process_converting_file_to_csv(
+    std::tuple<size_t, std::filesystem::path, std::string>& file_data,
+    database_connection_wrapper<file_system_database_connection>& db_conn)
+{
+    db_conn->change_file_status(std::get<0>(file_data), file_status::converting);
+    
+    // Create temporary file path to use it for converted file
+    std::filesystem::path temp_file_path = 
+        std::get<1>(file_data).parent_path() /
+        std::to_string(std::chrono::high_resolution_clock::now().time_since_epoch().count());;
+
+    // Try to convert file to csv
+    // If successful then remove original file, change file extension and status in database 
+    // otherwise just remove original file from the database and filesystem 
+    if (file_types_conversion::convert_file_to_csv(std::get<1>(file_data), temp_file_path))
+    {
+        try
         {
-            ++file_data_it;
+            // Remove original file because we don't need it anymore
+            std::filesystem::remove(std::get<1>(file_data));
         }
+        catch (const std::exception& ex)
+        {
+            LOG_ERROR << ex.what();
+        }
+        
+        // Update converted file data
+        std::get<1>(file_data).replace_extension("csv");
+        std::get<2>(file_data) = "csv";
+
+        try
+        {
+            // Rename converted file back to the original name but with .csv extension
+            std::filesystem::rename(temp_file_path, std::get<1>(file_data));
+        }
+        catch (const std::exception& ex)
+        {
+            LOG_ERROR << ex.what();
+        }
+        
+        size_t new_file_size;
+
+        try
+        {
+            new_file_size = std::filesystem::file_size(std::get<1>(file_data));
+        }
+        catch (const std::exception& ex)
+        {
+            LOG_ERROR << ex.what();
+        }
+        
+        db_conn->update_processed_file(
+            std::get<0>(file_data), 
+            std::get<2>(file_data), 
+            std::get<1>(file_data).c_str(), 
+            new_file_size);
+
+        return true;
+    }
+    else
+    {
+        db_conn->delete_file(std::get<0>(file_data));
+        
+        try
+        {
+            std::filesystem::remove(std::get<1>(file_data));
+        }
+        catch (const std::exception& ex)
+        {
+            LOG_ERROR << ex.what();
+        }
+        
+        return false;
     }
 }
 
-void request_handlers::file_system::convert_files_to_csv(
-    std::list<std::tuple<size_t, std::filesystem::path, std::string>>& files_data,
-    database_connection_wrapper<file_system_database_connection>& db_conn)
+void request_handlers::file_system::process_normalizing_csv_file(
+    std::tuple<size_t, std::filesystem::path, std::string> &file_data, 
+    size_t user_id,
+    size_t folder_id,
+    database_connection_wrapper<file_system_database_connection> &db_conn)
 {
-    for (auto& file_data : files_data)
+    db_conn->change_file_status(std::get<0>(file_data), file_status::normalizing);
+
+    // Try to normalize the file
+    if (csv_file_normalization::normalize_file(std::get<1>(file_data)))
     {
-        // Convert files with all extensions except csv
-        if (std::get<2>(file_data) == "csv")
-        {
-            db_conn->change_file_status(std::get<0>(file_data), file_status::ready_for_parsing);
-            
-            continue;
-        }
-    
-        db_conn->change_file_status(std::get<0>(file_data), file_status::converting);
-        
-        // Converted csv file will have the same path but csv extension
-        std::filesystem::path new_file_path = std::get<1>(file_data);
-        new_file_path.replace_extension("csv");
+        // If normalization succeeds then try to split the file
+        auto output_file_paths = csv_file_normalization::split_file(
+            std::get<1>(file_data),
+            std::get<1>(file_data).parent_path(),
+            config::MAX_ROWS_NUMBER_IN_NORMALIZED_FILE);
 
-        // Try to convert file to csv
-        // If successful then change file extension and status 
-        // otherwise remove file from the database and filesystem 
-        if (file_types_conversion::convert_file_to_csv(
-            std::get<2>(file_data), 
-            std::get<1>(file_data), 
-            new_file_path))
+        // If result is not empty then splitting succeded
+        if (!output_file_paths.empty())
         {
-            size_t new_file_size;
-
-            try
+            // If there is only one output file then it is just original file so update its size and change status  
+            if (output_file_paths.size() == 1)
             {
-                new_file_size = std::filesystem::file_size(new_file_path);
-            }
-            catch (const std::exception& ex)
-            {
-                LOG_ERROR << ex.what();
-            }
-            
-            db_conn->update_converted_file(std::get<0>(file_data), "csv", new_file_path.c_str(), new_file_size);
+                size_t new_file_size;
 
-            db_conn->change_file_status(std::get<0>(file_data), file_status::ready_for_parsing);
-        }
-        else
-        {
+                try
+                {
+                    new_file_size = std::filesystem::file_size(std::get<1>(file_data));
+                }
+                catch (const std::exception& ex)
+                {
+                    LOG_ERROR << ex.what();
+                }
+                
+                db_conn->update_processed_file(
+                    std::get<0>(file_data), 
+                    std::get<2>(file_data), 
+                    std::get<1>(file_data).c_str(),
+                    new_file_size);
+
+                db_conn->change_file_status(std::get<0>(file_data), file_status::ready_for_parsing);
+
+                return;
+            }
+
+            std::optional<std::string> file_name_opt = db_conn->get_file_name(std::get<0>(file_data));
+
+            if (!file_name_opt.has_value())
+            {
+                return;
+            }
+
+            // Assign name of the "original" file to the its file name with (0) 
+            // so the first file of the splitted files will have (1) number, the second one - (2) etc.
+            std::string current_file_name = file_name_opt.value() + "(0)";
+            std::optional<bool> does_file_exist_opt;
+            size_t opening_bracket, copy_number, non_digit_pos, current_file_size;
+
+            // Update current file name incrementing its number in brackets 
+            // until this name is available in database to assign it to current file
+            for (const auto& current_file_path : output_file_paths)
+            {
+                while (true)    
+                {
+                    // Look for the opening bracket of the file number
+                    opening_bracket = current_file_name.rfind('(', current_file_name.size() - 2);
+
+                    // Consider data between opening and closing brackets as file number
+                    copy_number = std::stoull(
+                        current_file_name.substr(opening_bracket + 1, current_file_name.size() - opening_bracket - 2), 
+                        &non_digit_pos);
+
+                    // Increment file number by one
+                    current_file_name.replace(
+                        opening_bracket + 1, 
+                        current_file_name.size() - opening_bracket - 2, 
+                        std::to_string(copy_number + 1));
+
+                    does_file_exist_opt = db_conn->check_file_existence_by_name(folder_id, current_file_name);
+
+                    if (!does_file_exist_opt.has_value())
+                    {
+                        return;
+                    }
+
+                    // We found the available file name so stop incrementing numbers
+                    if (!does_file_exist_opt.value())
+                    {
+                        break;
+                    }
+                }
+
+                try
+                {
+                    current_file_size = std::filesystem::file_size(current_file_path);
+                }
+                catch (const std::exception& ex)
+                {
+                    LOG_ERROR << ex.what();
+                }
+
+                // Insert current file with generated name and ready_for_parsing status
+                std::optional<std::tuple<size_t, std::filesystem::path, std::string>> current_file_data_opt = 
+                    db_conn->insert_processed_file(
+                        user_id,
+                        folder_id,
+                        current_file_name,
+                        "csv",
+                        current_file_size,
+                        file_status::ready_for_parsing);
+
+                if (!current_file_data_opt.has_value())
+                {
+                    return;
+                }
+
+                // Rename current splitted file to the specific name got from the database
+                try
+                {
+                    std::filesystem::rename(
+                        current_file_path, 
+                        std::get<1>(current_file_data_opt.value()));
+                }
+                catch (const std::exception& ex)
+                {
+                    LOG_ERROR << ex.what();
+
+                    return;
+                }
+            }
+
+            // Delete original file because there are splitted ones instead of it
+            db_conn->delete_file(std::get<0>(file_data));
+
             try
             {
                 std::filesystem::remove(std::get<1>(file_data));
@@ -749,8 +889,32 @@ void request_handlers::file_system::convert_files_to_csv(
             {
                 LOG_ERROR << ex.what();
             }
-            
+        }
+        else
+        {
             db_conn->delete_file(std::get<0>(file_data));
+            
+            try
+            {
+                std::filesystem::remove(std::get<1>(file_data));
+            }
+            catch (const std::exception& ex)
+            {
+                LOG_ERROR << ex.what();
+            }
+        }
+    }
+    else
+    {
+        db_conn->delete_file(std::get<0>(file_data));
+        
+        try
+        {
+            std::filesystem::remove(std::get<1>(file_data));
+        }
+        catch (const std::exception& ex)
+        {
+            LOG_ERROR << ex.what();
         }
     }
 }
@@ -761,16 +925,54 @@ void request_handlers::file_system::process_uploaded_files(
     size_t folder_id,
     database_connection_wrapper<file_system_database_connection>&& db_conn)
 {
-    // Unzip all the archives to get actual files
-    unzip_archives(files_data, user_id, folder_id, db_conn);
+    for (auto file_data_it = files_data.begin(); file_data_it != files_data.end(); ++file_data_it)
+    {
+        // Check if the file is archive
+        if (config::ALLOWED_ARCHIVE_EXTENSIONS.contains(std::get<2>(*file_data_it)))
+        {
+            // Unzip archive to get actual files
+            process_unzipping_archive(files_data, file_data_it, user_id, folder_id, db_conn);
+            
+            // Unzipped files will be added after the current archive so just skip it to process those files
+            continue;
+        }
 
-    // Convert xlsx, sql and txt files to csv
-    convert_files_to_csv(files_data, db_conn);
+        try
+        {
+            // If file is empty then delete it because it is useless
+            if (std::filesystem::is_empty(std::get<1>(*file_data_it)))
+            {
+                db_conn->delete_file(std::get<0>(*file_data_it));
+                
+                try
+                {
+                    std::filesystem::remove(std::get<1>(*file_data_it));
+                }
+                catch (const std::exception& ex)
+                {
+                    LOG_ERROR << ex.what();
+                }
 
-    // for (auto& file_data : files_data)
-    // {
-    //     db_conn->change_file_status(std::get<0>(file_data), file_status::ready_for_parsing);
-    // }
+                continue;
+            }
+        }
+        catch (const std::exception& ex)
+        {
+            LOG_ERROR << ex.what();
+        }
+
+        // Convert file to valid csv format
+        // If conversion fails then file will be deleted so just skip upcoming processing
+        if (!process_converting_file_to_csv(*file_data_it, db_conn))
+        {
+            continue;
+        }
+
+        // Normalize csv file by changing some structure and splitting file by rows into some files with constant 
+        // number of rows in each file
+        // After this processing all files have status ready_for_parsing and can be handled any way freely
+        process_normalizing_csv_file(*file_data_it, user_id, folder_id, db_conn);
+    }
 }
 
 void request_handlers::file_system::delete_files(const request_params& request, response_params& response)

@@ -1,4 +1,4 @@
-#include <database/user_database_connection/user_database_connection.hpp>
+#include <database/user/user_database_connection.hpp>
 
 bool user_database_connection::close_all_sessions_except_current_impl(
     pqxx::work& transaction, 

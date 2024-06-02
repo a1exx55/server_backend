@@ -1,4 +1,4 @@
-#include <database/file_system_database_connection/file_system_database_connection.hpp>
+#include <database/file_system/file_system_database_connection.hpp>
 
 bool file_system_database_connection::check_folder_existence_by_name_impl(
     pqxx::work& transaction, 
@@ -379,6 +379,44 @@ std::optional<json::object> file_system_database_connection::get_files_info(size
     } 
 }
 
+std::optional<std::string> file_system_database_connection::get_file_name(size_t file_id)
+{
+    pqxx::work transaction{*_conn};
+    
+    try
+    {
+        return transaction.query_value<std::string>(
+            std::format(
+                "SELECT name FROM files "
+                "WHERE id={}",
+                file_id));
+    }
+    // Connection is lost
+    catch (const pqxx::broken_connection& ex)
+    {
+        transaction.abort();
+        
+        if (reconnect())
+        {
+            return get_file_name(file_id);
+        }
+        else
+        {
+            LOG_ERROR << ex.what();
+            return {};
+        }
+    }
+    // File with given id doesn't exist
+    catch (const pqxx::unexpected_rows&)
+    {
+        return "";
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_ERROR << ex.what();
+        return {};
+    } 
+}
 std::optional<std::string> file_system_database_connection::get_file_path(size_t file_id)
 {
     pqxx::work transaction{*_conn};
@@ -615,12 +653,13 @@ std::optional<std::monostate> file_system_database_connection::update_uploaded_f
 }
 
 std::optional<std::tuple<size_t, std::filesystem::path, std::string>> 
-file_system_database_connection::insert_unzipped_file(
+file_system_database_connection::insert_processed_file(
     size_t user_id,
     size_t folder_id,
     std::string_view file_name,
     std::string_view file_extension,
-    size_t file_size)
+    size_t file_size,
+    file_status file_status)
 {
     pqxx::work transaction{*_conn};
     
@@ -631,14 +670,15 @@ file_system_database_connection::insert_unzipped_file(
                 "WITH current_id AS (SELECT nextval('files_id_seq')) "
                     "INSERT INTO files (id,name,extension,path,folder_id,size,upload_date,uploaded_by_user_id,status) "
                     "VALUES ((SELECT * FROM current_id),{0},{1},{2}||{3}||'/'||(SELECT * FROM current_id)::text||'.'||"
-                        "{1},{3},{4},LOCALTIMESTAMP,{5},'uploaded') "
+                        "{1},{3},{4},LOCALTIMESTAMP,{5},{6}) "
                     "RETURNING id,path",
                 transaction.quote(file_name),
                 transaction.quote(file_extension),
                 transaction.quote(config::FOLDERS_PATH),
                 folder_id,
                 file_size,
-                user_id));
+                user_id,
+                transaction.quote(magic_enum::enum_name(file_status))));
 
         transaction.commit();
 
@@ -651,7 +691,7 @@ file_system_database_connection::insert_unzipped_file(
         
         if (reconnect())
         {
-            return insert_unzipped_file(user_id, folder_id, file_name, file_extension, file_size);
+            return insert_processed_file(user_id, folder_id, file_name, file_extension, file_size, file_status);
         }
         else
         {
@@ -707,7 +747,7 @@ std::optional<std::monostate> file_system_database_connection::change_file_statu
     }
 }
 
-std::optional<std::monostate> file_system_database_connection::update_converted_file(
+std::optional<std::monostate> file_system_database_connection::update_processed_file(
     size_t file_id, 
     std::string_view new_file_extension, 
     std::string_view new_file_path, 
@@ -738,7 +778,7 @@ std::optional<std::monostate> file_system_database_connection::update_converted_
         
         if (reconnect())
         {
-            return update_converted_file(file_id, new_file_extension, new_file_path, new_file_size);
+            return update_processed_file(file_id, new_file_extension, new_file_path, new_file_size);
         }
         else
         {

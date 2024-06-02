@@ -5,10 +5,11 @@
 #include <request_handlers/error_response_preparing.hpp>
 #include <config.hpp>
 #include <database/database_connections_pool.hpp>
-#include <database/file_system_database_connection/file_system_database_connection.hpp>
+#include <database/file_system/file_system_database_connection.hpp>
 #include <network/request_and_response_params.hpp>
 #include <utils/http_utils/uri.hpp>
 #include <parsing/file_types_conversion/file_types_conversion.hpp>
+#include <parsing/csv_file_normalization/csv_file_normalization.hpp>
 #include <parsing/file_preview/file_preview.hpp>
 
 // external
@@ -47,14 +48,21 @@ namespace request_handlers
             static void rename_file(const request_params& request, response_params& response);
 
         private:
-            static void unzip_archives(
-                std::list<std::tuple<size_t, std::filesystem::path, std::string>>& file_ids_and_paths,
+            static void process_unzipping_archive(
+                std::list<std::tuple<size_t, std::filesystem::path, std::string>>& files_data,
+                std::list<std::tuple<size_t, std::filesystem::path, std::string>>::iterator file_data_it,
                 size_t user_id,
                 size_t folder_id,
                 database_connection_wrapper<file_system_database_connection>& db_conn);
 
-            static void convert_files_to_csv(
-                std::list<std::tuple<size_t, std::filesystem::path, std::string>>& file_ids_and_paths,
+            static bool process_converting_file_to_csv(
+                std::tuple<size_t, std::filesystem::path, std::string>& file_data,
+                database_connection_wrapper<file_system_database_connection>& db_conn);
+
+            static void process_normalizing_csv_file(
+                std::tuple<size_t, std::filesystem::path, std::string>& file_data,
+                size_t user_id,
+                size_t folder_id,
                 database_connection_wrapper<file_system_database_connection>& db_conn);
     };
 }

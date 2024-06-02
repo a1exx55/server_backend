@@ -641,7 +641,7 @@ void http_session::upload_files()
                 beast::get_lowest_layer(_stream).expires_after(std::chrono::seconds(30));
 
                 // Read the first file header obtaining bytes until the empty string 
-                // that represents the delimeter between file header and data itself
+                // that represents the delimiter between file header and data itself
                 asio::async_read_until(_stream, buffer, "\r\n\r\n", 
                     beast::bind_front_handler( 
                         &http_session::process_uploading_file_header, 

@@ -40,6 +40,14 @@ namespace config
     inline std::unordered_set<std::string> ALLOWED_ARCHIVE_EXTENSIONS;
     inline std::unordered_set<std::string> ALLOWED_PARSING_FILE_EXTENSIONS;
     inline std::string PATH_TO_7ZIP_LIB;
+    // Number of rows that is being examined to determine the type of file
+    inline size_t ROWS_NUMBER_TO_EXAMINE;
+    // Assumed maximum number of bytes that any row can contain in file of any type
+    // This option is necessary to process file reading it into buffer by chunks 
+    // to know whether the left part of buffer can represent the row or not
+    inline size_t MAX_BYTES_NUMBER_IN_ROW;
+    // The maximum rows number that each normalized file can contain 
+    inline size_t MAX_ROWS_NUMBER_IN_NORMALIZED_FILE;
 
     inline void init()
     {
@@ -92,6 +100,9 @@ namespace config
             ALLOWED_PARSING_FILE_EXTENSIONS.emplace(file_extension.as_string());
         }
         PATH_TO_7ZIP_LIB = config_json.at("PATH_TO_7ZIP_LIB").as_string();
+        ROWS_NUMBER_TO_EXAMINE = config_json.at("ROWS_NUMBER_TO_EXAMINE").to_number<size_t>();
+        MAX_BYTES_NUMBER_IN_ROW = config_json.at("MAX_BYTES_NUMBER_IN_ROW").to_number<size_t>();
+        MAX_ROWS_NUMBER_IN_NORMALIZED_FILE = config_json.at("MAX_ROWS_NUMBER_IN_NORMALIZED_FILE").to_number<size_t>();
     }
 }
 

@@ -182,7 +182,8 @@ namespace http_utils
                     try
                     {
                         param_value_to_store = std::stoll(
-                            std::string{uri.substr(equal_sign_position + 1, end_position - equal_sign_position - 1)});
+                            std::string{uri.substr(equal_sign_position + 1, end_position - equal_sign_position - 1)},
+                            &start_position);
 
                         // Query parameter string value representation contains non digits after valid number
                         if (start_position != 

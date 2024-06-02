@@ -5,7 +5,7 @@
 #include <request_handlers/error_response_preparing.hpp>
 #include <config.hpp>
 #include <database/database_connections_pool.hpp>
-#include <database/user_database_connection/user_database_connection.hpp>
+#include <database/user/user_database_connection.hpp>
 #include <network/request_and_response_params.hpp>
 #include <utils/http_utils/uri.hpp>
 

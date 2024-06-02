@@ -10,13 +10,13 @@ size_t file_preview::get_file_rows_number(const std::string& file_path)
         return static_cast<size_t>(-1);
     }
 
-    const size_t BUFFER_SIZE = 1024 * 1024;
-    std::array<char, BUFFER_SIZE> buffer;
+    const size_t buffer_size = config::ROWS_NUMBER_TO_EXAMINE * config::MAX_BYTES_NUMBER_IN_ROW;
+    std::string buffer(buffer_size, char());
 
     size_t rows_number = 0;
 
-    // Read file by chunks of 1 MB into static buffer while there are read bytes 
-    while (size_t read_bytes = file.read(buffer.data(), BUFFER_SIZE).gcount())
+    // Read file by chunks into buffer while there are read bytes 
+    while (size_t read_bytes = file.read(buffer.data(), buffer_size).gcount())
     {
         // Go through the buffer and count the number of line feeds('\n') which represent rows
         for (size_t i = 0; i < read_bytes; ++i)
@@ -36,8 +36,9 @@ std::pair<uint8_t, json::array> file_preview::get_file_raw_rows(
     size_t from_row_number, 
     size_t rows_number)
 {
-    // Invalid parametes as we don't process very large amount of rows or zero rows
-    if (rows_number > 10000 || rows_number == 0)
+    // Any normalized file can't have more than MAX_ROWS_NUMBER_IN_NORMALIZED_FILE rows so don't process 
+    // such requests. Zero rows doesn't have any sense too
+    if (rows_number > config::MAX_ROWS_NUMBER_IN_NORMALIZED_FILE || rows_number == 0)
     {
         return {2, {}};
     }
@@ -50,9 +51,8 @@ std::pair<uint8_t, json::array> file_preview::get_file_raw_rows(
         return {1, {}};
     }
 
-    // Set buffer size to 1 MB
-    const size_t BUFFER_SIZE = 1024 * 1024;
-    std::array<char, BUFFER_SIZE> buffer;
+    const size_t buffer_size = config::ROWS_NUMBER_TO_EXAMINE * config::MAX_BYTES_NUMBER_IN_ROW;;
+    std::string buffer(buffer_size, char());
 
     size_t current_row_number = 0, offset = 0, read_bytes;
 
@@ -64,7 +64,7 @@ std::pair<uint8_t, json::array> file_preview::get_file_raw_rows(
     }
 
     // We need to get to the from_row_number row to start getting the actual rows
-    while ((read_bytes = file.read(buffer.data(), BUFFER_SIZE).gcount()))
+    while ((read_bytes = file.read(buffer.data(), buffer_size).gcount()))
     {
         // Go through the buffer and count the number of line feeds('\n') which represent rows
         for (size_t i = 0; i < read_bytes; ++i)
@@ -90,30 +90,28 @@ std::pair<uint8_t, json::array> file_preview::get_file_raw_rows(
     // than the actual number of rows so we can't get desired rows
     return {2, {}};
 
-rows_processing:
+    rows_processing:
 
     // Move the unprocessed remainder of buffer to the beggining
     std::move(buffer.begin() + offset, buffer.begin() + read_bytes, buffer.begin());
 
     // Read bytes until the buffer is full
-    read_bytes += file.read(buffer.data() + read_bytes - offset, BUFFER_SIZE - read_bytes + offset).gcount();
+    read_bytes = read_bytes - offset + 
+        file.read(buffer.data() + read_bytes - offset, buffer_size - read_bytes + offset).gcount();
 
-    // Use variable to store position in buffer where the row starts
-    size_t row_start_position = 0;
+    // Use first variable to store position in buffer where the row starts
+    size_t row_start_position = 0, i;
     offset = 0;
 
     // Reset current_row_number to use it as counter of processed rows
     current_row_number = 0;
-
-    // Count the number of entirely read buffers which actually represents the size of processed rows 
-    size_t read_buffers_number = 0;
     
     json::array rows_array;
 
     do
     {
         // Go through the buffer and count the number of line feeds('\n') which represent rows
-        for (size_t i = offset; i < read_bytes; ++i)
+        for (i = offset; i < offset + read_bytes; ++i)
         {
             if (buffer[i] == '\n')
             {
@@ -132,23 +130,15 @@ rows_processing:
             }
         }
 
-        // First condition means that current row can't fit in the whole buffer so we consider it too large
-        // Second condition means that we processed more than 1000 buffers and since buffer size is 1 MB
-        // so desired rows weight more than 1 GB that is again too large for us
-        if (row_start_position == 0 || ++read_buffers_number > 1000)
-        {
-            return {3, {}};
-        }
-
-        // Move the unprocessed remainder of buffer to the beggining
+        // Move the unprocessed remainder of buffer to the beginning
         std::move(buffer.begin() + row_start_position, buffer.end(), buffer.begin());
 
-        // Set offset to to avoid handling already processed part of buffer
-        offset = BUFFER_SIZE - row_start_position;
+        // Set offset to avoid handling already processed part of buffer
+        offset = buffer_size - row_start_position;
         row_start_position = 0;
     }
-    // Read file by chunks of 1 MB into static buffer while there are read bytes 
-    while ((read_bytes = file.read(buffer.data() + offset, BUFFER_SIZE - offset).gcount()));
+    // Read file by chunks into buffer while there are read bytes 
+    while ((read_bytes = file.read(buffer.data() + offset, buffer_size - offset).gcount()));
 
     return {0, rows_array};
 }

@@ -23,8 +23,7 @@ class file_preview
         On failure return error code and empty json array
         Error codes:
         1 - error occured while opening file
-        2 - invalid row parameters provided
-        3 - too large data to preview - either single row weights more than 1 MB or total rows weights more than 1 GB */
+        2 - invalid row parameters provided */
         static std::pair<uint8_t, json::array> get_file_raw_rows(
             const std::string& file_path, 
             size_t from_row_number, 

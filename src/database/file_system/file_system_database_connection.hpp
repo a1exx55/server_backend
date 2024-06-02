@@ -21,6 +21,7 @@ enum class file_status
     uploaded,
     unzipping,
     converting,
+    normalizing,
     ready_for_parsing,
     parsing
 };
@@ -43,6 +44,8 @@ class file_system_database_connection : public database_connection
         std::optional<bool> rename_folder(size_t folder_id, std::string_view new_folder_name);
 
         std::optional<json::object> get_files_info(size_t folder_id);
+
+        std::optional<std::string> get_file_name(size_t file_id);
 
         std::optional<std::string> get_file_path(size_t file_id);
 
@@ -73,17 +76,18 @@ class file_system_database_connection : public database_connection
         // Return empty std::optional on fail
         std::optional<std::monostate> update_uploaded_file(size_t file_id, size_t file_size);
 
-        std::optional<std::tuple<size_t, std::filesystem::path, std::string>> insert_unzipped_file(
+        std::optional<std::tuple<size_t, std::filesystem::path, std::string>> insert_processed_file(
             size_t user_id,
             size_t folder_id,
             std::string_view file_name,
             std::string_view file_extension,
-            size_t file_size);
+            size_t file_size,
+            file_status file_status);
 
         std::optional<std::monostate> change_file_status(size_t file_id, file_status new_status);
 
         // Update 'files' table by changing extension, size and updating path with the new extension
-        std::optional<std::monostate> update_converted_file(
+        std::optional<std::monostate> update_processed_file(
             size_t file_id, 
             std::string_view new_file_extension, 
             std::string_view new_file_path, 
