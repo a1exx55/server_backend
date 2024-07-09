@@ -6,7 +6,7 @@ std::pair<std::string, std::string> jwt_utils::create_tokens(const json::object&
     const auto current_time = jwt::date::clock::now();
 
     // Create and initialize access token
-    auto builder = jwt::create<traits>().set_expires_at(current_time + config::ACCESS_TOKEN_EXPIRY_TIME_MINUTES);
+    auto builder = jwt::create<traits>().set_expires_at(current_time + config::access_token_expiry_time_minutes);
 
     for (const auto& [key, value] : custom_claims)
         builder = builder.set_payload_claim(key, value);
@@ -17,7 +17,7 @@ std::pair<std::string, std::string> jwt_utils::create_tokens(const json::object&
     tokens.first = builder.sign(_crypto_algrorithm);
 
     // Create and initialize refresh token
-    builder = jwt::create<traits>().set_expires_at(current_time + config::REFRESH_TOKEN_EXPIRY_TIME_DAYS);
+    builder = jwt::create<traits>().set_expires_at(current_time + config::refresh_token_expiry_time_days);
 
     for (const auto& [key, value] : custom_claims)
         builder = builder.set_payload_claim(key, value);
@@ -46,7 +46,7 @@ std::pair<std::string, std::string> jwt_utils::refresh_tokens(const std::string&
     builder.set_payload_claim("timestamp", std::chrono::high_resolution_clock::now().time_since_epoch().count());
     
     tokens.first = builder
-        .set_expires_at(current_time + config::ACCESS_TOKEN_EXPIRY_TIME_MINUTES)
+        .set_expires_at(current_time + config::access_token_expiry_time_minutes)
         .sign(_crypto_algrorithm);
 
     // Create and initialize refresh token
@@ -59,7 +59,7 @@ std::pair<std::string, std::string> jwt_utils::refresh_tokens(const std::string&
     builder.set_payload_claim("timestamp", std::chrono::high_resolution_clock::now().time_since_epoch().count());
     
     tokens.second = builder
-        .set_expires_at(current_time + config::REFRESH_TOKEN_EXPIRY_TIME_DAYS)
+        .set_expires_at(current_time + config::refresh_token_expiry_time_days)
         .sign(_crypto_algrorithm);
 
     return tokens;

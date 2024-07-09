@@ -31,15 +31,15 @@ namespace server
 
             // Initialize pool of database connections
             database_connections_pool::init(
-                config::DATABASE_CONNECTIONS_NUMBER,
-                config::DATABASE_USERNAME,
-                config::DATABASE_PASSWORD,
+                config::database_connections_number,
+                config::database_username,
+                config::database_password,
                 "127.0.0.1",
-                config::DATABASE_PORT,
-                config::DATABASE_NAME);
+                config::database_port,
+                config::database_name);
 
             // The io_context is required for all I/O
-            asio::io_context io_context{config::THREADS_NUMBER};
+            asio::io_context io_context{config::threads_number};
 
             // The SSL context is required, and holds certificates
             ssl::context ssl_context{ssl::context::tlsv12};
@@ -51,7 +51,7 @@ namespace server
             std::make_shared<listener>(
                 io_context,
                 ssl_context,
-                tcp::endpoint{asio::ip::make_address(config::SERVER_IP_ADDRESS), config::SERVER_PORT})->run();
+                tcp::endpoint{asio::ip::make_address(config::server_ip_address), config::server_port})->run();
 
             // Capture SIGINT and SIGTERM to perform a clean shutdown
             asio::signal_set signals(io_context, SIGINT, SIGTERM);
@@ -66,8 +66,8 @@ namespace server
 
             // Run the I/O service on the requested number of threads
             std::vector<std::thread> thread_pool;
-            thread_pool.reserve(config::THREADS_NUMBER - 1);
-            for (auto i = config::THREADS_NUMBER - 1; i > 0; --i)
+            thread_pool.reserve(config::threads_number - 1);
+            for (auto i = config::threads_number - 1; i > 0; --i)
             {
                 thread_pool.emplace_back(
                     [&io_context]

@@ -72,7 +72,7 @@ void request_handlers::user::login(const request_params& request, response_param
         // otherwise set it to -1 to signal that cookies have to be erased after browser closure
         if (response.remember_me)
         {
-            response.max_age = config::REFRESH_TOKEN_EXPIRY_TIME_DAYS;
+            response.max_age = config::refresh_token_expiry_time_days;
         }
         else
         {
@@ -186,7 +186,7 @@ void request_handlers::user::refresh_tokens(const request_params& request, respo
     // otherwise set it to -1 to signal that cookies have to be erased after browser closure
     if (response.remember_me)
     {
-        response.max_age = config::REFRESH_TOKEN_EXPIRY_TIME_DAYS;
+        response.max_age = config::refresh_token_expiry_time_days;
     }
     else
     {

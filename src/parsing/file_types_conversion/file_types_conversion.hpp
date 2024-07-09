@@ -45,12 +45,12 @@ class file_types_conversion
             const std::filesystem::path& csv_file_path);
 
         // Determine the number of fields in sql-like file 
-        // It processes only a part of file with config::ROWS_NUMBER_TO_EXAMINE rows
+        // It processes only a part of file with config::rows_number_to_examine rows
         // Return the most common fields number among processed rows on success or -1 if the file can't be opened
         static size_t determine_fields_number_in_sql_like_file(const std::filesystem::path& sql_like_file_path);
 
         // Determine the number of fields in csv-like file 
-        // It processes only a part of file with config::ROWS_NUMBER_TO_EXAMINE rows
+        // It processes only a part of file with config::rows_number_to_examine rows
         // Return the most common fields number among processed rows on success or -1 if the file can't be opened
         static size_t determine_fields_number_in_csv_like_file(
             const std::filesystem::path& csv_like_file_path,

@@ -77,7 +77,7 @@ namespace http_utils
 
             // Find the specific endpoint among stored endpoints by uri and http method
             // Return corresponding endpoint of finding, otherwise return empty http_endpoint
-            http_endpoint<T> find_endpoint(std::string_view uri, boost::beast::http::verb method) const
+            const http_endpoint<T>& find_endpoint(std::string_view uri, boost::beast::http::verb method) const
             {
                 if (!_initial_path_segment)
                 {

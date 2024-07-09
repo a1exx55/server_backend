@@ -50,7 +50,7 @@ bool file_types_conversion::is_text_file_sql_like(const std::filesystem::path& t
     }
 
     // Take buffer size of the number of bytes that is enough to process predefined number of rows to be examined
-    const size_t buffer_size = config::ROWS_NUMBER_TO_EXAMINE * config::MAX_BYTES_NUMBER_IN_ROW;
+    const size_t buffer_size = config::rows_number_to_examine * config::max_bytes_number_in_row;
     std::string buffer(buffer_size, char());
 
     text_file.read(buffer.data(), buffer_size);
@@ -66,7 +66,7 @@ bool file_types_conversion::is_text_file_sql_like(const std::filesystem::path& t
     std::string_view row, field;
 
     // Process rows until we process predefined number or file ends up
-    for (i = 0; i < config::ROWS_NUMBER_TO_EXAMINE && newline_position != std::string::npos; ++i)
+    for (i = 0; i < config::rows_number_to_examine && newline_position != std::string::npos; ++i)
     {
         // Since in sql like files newlines can't be in field values(they are represented as two characters \n instead)
         // then we can just split file rows by line feeds
@@ -251,7 +251,7 @@ bool file_types_conversion::convert_sql_like_file_to_csv(
     }
 
     // Take buffer size of the number of bytes that is enough to process predefined number of rows to be examined
-    const size_t buffer_size = config::ROWS_NUMBER_TO_EXAMINE * config::MAX_BYTES_NUMBER_IN_ROW;
+    const size_t buffer_size = config::rows_number_to_examine * config::max_bytes_number_in_row;
     std::string buffer(buffer_size, char());
 
     sql_like_file.read(buffer.data(), buffer_size);
@@ -511,10 +511,10 @@ bool file_types_conversion::convert_sql_like_file_to_csv(
             start_position = buffer_size;
         }
 
-        // We assume that each row has to be less than config::MAX_BYTES_NUMBER_IN_ROW bytes 
+        // We assume that each row has to be less than config::max_bytes_number_in_row bytes 
         // so if it is left less in buffer and we didn't read all the file 
         // then move the remainder to the beginning and read up to buffer_size again 
-        if (is_reading_pending && buffer_size - start_position < config::MAX_BYTES_NUMBER_IN_ROW)
+        if (is_reading_pending && buffer_size - start_position < config::max_bytes_number_in_row)
         {
             std::move(buffer.begin() + start_position, buffer.end(), buffer.begin());
 
@@ -542,7 +542,7 @@ bool file_types_conversion::convert_sql_like_file_to_csv(
                 // If the beginning of the new row was found and the remaining buffer is enough for that row
                 // then just assign found beginning to the start position
                 if (newline_position != std::string::npos && 
-                    buffer_size - newline_position - 1 >= config::MAX_BYTES_NUMBER_IN_ROW)
+                    buffer_size - newline_position - 1 >= config::max_bytes_number_in_row)
                 {
                     start_position = newline_position + 1;
                 }
@@ -574,7 +574,7 @@ size_t file_types_conversion::determine_fields_number_in_sql_like_file(
     }
 
     // Take buffer size of the number of bytes that is enough to process predefined number of rows to be examined
-    const size_t buffer_size = config::ROWS_NUMBER_TO_EXAMINE * config::MAX_BYTES_NUMBER_IN_ROW;
+    const size_t buffer_size = config::rows_number_to_examine * config::max_bytes_number_in_row;
     std::string buffer(buffer_size, char());
 
     sql_like_file.read(buffer.data(), buffer_size);
@@ -592,7 +592,7 @@ size_t file_types_conversion::determine_fields_number_in_sql_like_file(
     std::unordered_map<size_t, size_t> different_field_numbers;
 
     // Process rows until we process predefined number or file ends up
-    for (size_t i = 0; i < config::ROWS_NUMBER_TO_EXAMINE && newline_position != std::string::npos; ++i)
+    for (size_t i = 0; i < config::rows_number_to_examine && newline_position != std::string::npos; ++i)
     {
         // Reset fields number to count it for each row
         fields_number = 0;
@@ -763,7 +763,7 @@ size_t file_types_conversion::determine_fields_number_in_csv_like_file(
     }
 
     // Take buffer size of the number of bytes that is enough to process predefined number of rows to be examined
-    const size_t buffer_size = config::ROWS_NUMBER_TO_EXAMINE * config::MAX_BYTES_NUMBER_IN_ROW;
+    const size_t buffer_size = config::rows_number_to_examine * config::max_bytes_number_in_row;
     std::string buffer(buffer_size, char());
 
     csv_like_file.read(buffer.data(), buffer_size);
@@ -787,7 +787,7 @@ size_t file_types_conversion::determine_fields_number_in_csv_like_file(
     // has to contain permanent fields number, separated by delimiter, but double quotes are ignored 
     // so any line feed means new row) by converting it to rigth csv format. If even these simplified rules
     // can't be accepted then skip the row as invalid.
-    for (size_t i = 0; i < config::ROWS_NUMBER_TO_EXAMINE && newline_position != std::string::npos; ++i)
+    for (size_t i = 0; i < config::rows_number_to_examine && newline_position != std::string::npos; ++i)
     {
         // Look for the newline that is assumed to be the end of the current row(this can be changed later
         // because this line feed might be the part of the actual row)
@@ -855,8 +855,8 @@ size_t file_types_conversion::determine_fields_number_in_csv_like_file(
                             input_row = std::string_view{buffer.begin() + row_start_position, buffer.end()};
                         }
 
-                        // If the row can't fit in config::MAX_BYTES_NUMBER_IN_ROW then assume that it is not csv like
-                        if (input_row.size() > config::MAX_BYTES_NUMBER_IN_ROW)
+                        // If the row can't fit in config::max_bytes_number_in_row then assume that it is not csv like
+                        if (input_row.size() > config::max_bytes_number_in_row)
                         {
                             goto not_csv_like_row_processing;
                         }
@@ -1012,7 +1012,7 @@ bool file_types_conversion::convert_csv_like_file_to_csv(
     }
 
     // Take buffer size of the number of bytes that is enough to process predefined number of rows to be examined
-    const size_t buffer_size = config::ROWS_NUMBER_TO_EXAMINE * config::MAX_BYTES_NUMBER_IN_ROW;
+    const size_t buffer_size = config::rows_number_to_examine * config::max_bytes_number_in_row;
     std::string buffer(buffer_size, char());
 
     text_file.read(buffer.data(), buffer_size);
@@ -1115,8 +1115,8 @@ bool file_types_conversion::convert_csv_like_file_to_csv(
                             input_row = std::string_view{buffer.begin() + row_start_position, buffer.end()};
                         }
 
-                        // If the row can't fit in config::MAX_BYTES_NUMBER_IN_ROW then assume that it is not csv like
-                        if (input_row.size() > config::MAX_BYTES_NUMBER_IN_ROW)
+                        // If the row can't fit in config::max_bytes_number_in_row then assume that it is not csv like
+                        if (input_row.size() > config::max_bytes_number_in_row)
                         {
                             goto not_csv_like_row_processing;
                         }
@@ -1327,10 +1327,10 @@ bool file_types_conversion::convert_csv_like_file_to_csv(
             row_start_position = buffer_size;
         }
 
-        // We assume that each row has to be less than config::MAX_BYTES_NUMBER_IN_ROW bytes 
+        // We assume that each row has to be less than config::max_bytes_number_in_row bytes 
         // so if it is left less in buffer and we didn't read all the file 
         // then move the remainder to the beginning and read up to buffer_size again 
-        if (is_reading_pending && buffer_size - row_start_position < config::MAX_BYTES_NUMBER_IN_ROW)
+        if (is_reading_pending && buffer_size - row_start_position < config::max_bytes_number_in_row)
         {
             std::move(buffer.begin() + row_start_position, buffer.end(), buffer.begin());
 
@@ -1358,7 +1358,7 @@ bool file_types_conversion::convert_csv_like_file_to_csv(
                 // If the beginning of the new row was found and the remaining buffer is enough for that row
                 // then just assign found beginning to the start position
                 if (newline_position != std::string::npos && 
-                    buffer_size - newline_position - 1 >= config::MAX_BYTES_NUMBER_IN_ROW)
+                    buffer_size - newline_position - 1 >= config::max_bytes_number_in_row)
                 {
                     row_start_position = newline_position + 1;
                 }
@@ -1476,7 +1476,7 @@ bool file_types_conversion::convert_sql_to_csv(
     }
 
     // Take buffer size of the number of bytes that is enough to process predefined number of rows to be examined
-    const size_t buffer_size = config::ROWS_NUMBER_TO_EXAMINE * config::MAX_BYTES_NUMBER_IN_ROW;
+    const size_t buffer_size = config::rows_number_to_examine * config::max_bytes_number_in_row;
     std::string buffer(buffer_size, char());
     size_t start_position, end_position;
 
@@ -1609,8 +1609,8 @@ bool file_types_conversion::convert_sql_to_csv(
                 end_position = start_position;
 
                 // In string field there can be single quote but it can be escaped with odd number of backslashes
-                // because of escaped backslashes: ///' -> /' that is just quote within field,
-                // but //' is a escaped backslash with quote that is the end of field
+                // because of escaped backslashes: \\\' -> \' that is just quote within field,
+                // but \\' is a escaped backslash with quote that is the end of field
                 // so search for single quote with even number of preceding backslashes to find the end of field
                 do
                 {
@@ -1625,7 +1625,7 @@ bool file_types_conversion::convert_sql_to_csv(
                     {
                         ++backslashes_number;
                     }
-                } 
+                }
                 while (backslashes_number % 2 == 1);
                                 
                 // Get string field value between single quotes
@@ -1634,54 +1634,62 @@ bool file_types_conversion::convert_sql_to_csv(
                 // Move to the data after the field value to parse
                 start_position = end_position + 2;
 
-                // Not escaped first double quote is forbidden so the row is invalid 
-                if (field.front() == '"')
-                {
-                    return process_failed_conversion();
-                }
-
                 // Parse special sql sequences starting with backslash
                 // by replacing them with appropriate symbols in csv
-                for (size_t j = field.size() - 1; j > 0 && j < field.size(); --j)
+                for (ssize_t j = 0; j < static_cast<ssize_t>(field.size()) - 1; ++j)
                 {
-                    // Double quote has to be doubled in csv so just replace backslash with double qoute
-                    if (field[j] == '"')
+                    if (field[j] == '\\')
                     {
-                        if (field[j - 1] == '\\')
+                        switch (field[j + 1])
                         {
-                            field[j - 1] = '"';
-                            --j;
-                        }
-                        else
-                        {
-                            return process_failed_conversion();
+                            // Double quote has to be doubled in csv so just replace backslash with double qoute
+                            case '"':
+                            {
+                                field[j] = '"';
+                                ++j;
+                                break;
+                            }
+                            // Single quote and backslash are reqular symbols is csv so just erase first backslash
+                            case '\'':
+                            case '\\':
+                            {
+                                field.erase(j, 1);
+                                break;
+                            }
+                            // Replace \n string with actual line feed character that is newline
+                            case 'n':
+                            {
+                                field.replace(j, 2, "\n");
+                                break;
+                            }
+                            // Replace \t string with actual tab character
+                            case 't':
+                            {
+                                field.replace(j, 2, "\t");
+                                break;
+                            }
+                            // Erase other special symbols as they are useless
+                            default:
+                            {
+                                field.erase(j, 2);
+                                --j;
+                                break;
+                            }
                         }
                     }
-                    // Single quote and backslash are reqular symbols is csv so just erase first backslash
-                    else if (field[j] == '\'' || field[j] == '\\')
+                    // Not escaped double quote is forbidden in sql
+                    else if (field[j] == '"')
                     {
-                        if (field[j - 1] == '\\')
-                        {
-                            field.erase(j - 1, 1);
-                            --j;
-                        }
-                        else
-                        {
-                            return process_failed_conversion();
-                        }
+                        return process_failed_conversion();
                     }
-                    // Replace \n string with actual line feed character that is newline
-                    else if (field[j] == 'n' && field[j - 1] == '\\')
-                    {
-                        field.replace(j - 1, 2, "\n");
-                        --j;
-                    }
-                    // Erase \r as it is useless
-                    else if (field[j] == 'r' && field[j - 1] == '\\')
-                    {
-                        field.erase(j - 1, 2);
-                        --j;
-                    }
+                }
+
+                // Separately check that the last symbol is not unprocessed double quote 
+                // (it has to be already escaped with double quote) as we didn't do it within the loop
+                if (field == "\"" ||
+                    field.size() > 1 && field[field.size() - 1] == '"' && field[field.size() - 2] != '"')
+                {
+                    return process_failed_conversion();
                 }
 
                 has_to_be_field_quoted = false;
@@ -1806,10 +1814,10 @@ bool file_types_conversion::convert_sql_to_csv(
             start_position += 2;
         }
 
-        // We assume that each row has to be less than config::MAX_BYTES_NUMBER_IN_ROW bytes 
+        // We assume that each row has to be less than config::max_bytes_number_in_row bytes 
         // so if it is left less in buffer and we didn't read all the file 
         // then move the remainder to the beginning and read up to buffer_size again 
-        if (is_reading_pending && buffer_size - start_position < config::MAX_BYTES_NUMBER_IN_ROW)
+        if (is_reading_pending && buffer_size - start_position < config::max_bytes_number_in_row)
         {
             std::move(buffer.begin() + start_position, buffer.end(), buffer.begin());
 

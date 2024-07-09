@@ -17,92 +17,95 @@ namespace json = boost::json;
 namespace config
 {
     // Path to the json config
-    inline const std::string CONFIG_PATH{"../config.json"};
+    inline const std::string config_path{"../config.json"};
 
-    inline std::string SERVER_IP_ADDRESS;
-    inline uint_least16_t SERVER_PORT;
-    inline std::string DOMAIN_NAME;
-    inline int THREADS_NUMBER;
-    inline size_t DATABASE_CONNECTIONS_NUMBER;
-    inline size_t DATABASE_PORT;
-    inline std::string DATABASE_NAME;
-    inline std::string DATABASE_USERNAME;
-    inline std::string DATABASE_PASSWORD;
-    inline std::string FOLDERS_PATH;
-    inline std::string LOG_FILE_PATH;
-    inline std::string SSL_CERT_PATH;
-    inline std::string SSL_KEY_PATH;
-    inline bool CONSOLE_LOG_ENABLED;
-    inline std::string JWT_SECRET_KEY;
-    inline std::chrono::minutes ACCESS_TOKEN_EXPIRY_TIME_MINUTES;
-    inline std::chrono::days REFRESH_TOKEN_EXPIRY_TIME_DAYS;
-    inline std::unordered_set<std::string> ALLOWED_UPLOADING_FILE_EXTENSIONS;
-    inline std::unordered_set<std::string> ALLOWED_ARCHIVE_EXTENSIONS;
-    inline std::unordered_set<std::string> ALLOWED_PARSING_FILE_EXTENSIONS;
-    inline std::string PATH_TO_7ZIP_LIB;
+    inline std::string server_ip_address;
+    inline uint_least16_t server_port;
+    inline std::string domain_name;
+    inline int threads_number;
+    inline size_t database_connections_number;
+    inline size_t database_port;
+    inline std::string database_name;
+    inline std::string database_username;
+    inline std::string database_password;
+    inline std::string folders_path;
+    inline std::string log_file_path;
+    inline std::string ssl_cert_path;
+    inline std::string ssl_key_path;
+    inline bool console_log_enabled;
+    inline std::string jwt_secret_key;
+    inline std::chrono::minutes access_token_expiry_time_minutes;
+    inline std::chrono::days refresh_token_expiry_time_days;
+    inline std::chrono::seconds operations_timeout;
+    inline std::unordered_set<std::string> allowed_uploading_file_extensions;
+    inline std::unordered_set<std::string> allowed_archive_extensions;
+    inline std::unordered_set<std::string> allowed_parsing_file_extensions;
+    inline std::string path_to_7zip_lib;
     // Number of rows that is being examined to determine the type of file
-    inline size_t ROWS_NUMBER_TO_EXAMINE;
+    inline size_t rows_number_to_examine;
     // Assumed maximum number of bytes that any row can contain in file of any type
     // This option is necessary to process file reading it into buffer by chunks 
     // to know whether the left part of buffer can represent the row or not
-    inline size_t MAX_BYTES_NUMBER_IN_ROW;
+    inline size_t max_bytes_number_in_row;
     // The maximum rows number that each normalized file can contain 
-    inline size_t MAX_ROWS_NUMBER_IN_NORMALIZED_FILE;
+    inline size_t max_rows_number_in_normalized_file;
 
     inline void init()
     {
-        std::ifstream config_file{CONFIG_PATH};
+        std::ifstream config_file{config_path};
 
         if (!config_file.is_open())
         {
             throw std::invalid_argument{
                 "Config file was not found at the specified path: " + 
-                std::filesystem::canonical(config::CONFIG_PATH).string()};
+                std::filesystem::canonical(config::config_path).string()};
         }
         
         std::string config_data;
-        size_t config_file_size = std::filesystem::file_size(CONFIG_PATH);
+        size_t config_file_size = std::filesystem::file_size(config_path);
         config_data.resize(config_file_size);
 
         config_file.read(config_data.data(), config_file_size);
         json::object config_json = json::parse(config_data).as_object();
         
         // Initialize config variables with values from json
-        SERVER_IP_ADDRESS = config_json.at("SERVER_IP_ADDRESS").as_string();
-        SERVER_PORT = config_json.at("SERVER_PORT").to_number<uint_least16_t>();
-        DOMAIN_NAME = config_json.at("DOMAIN_NAME").as_string();
-        THREADS_NUMBER = config_json.at("THREADS_NUMBER").to_number<int>();
-        DATABASE_CONNECTIONS_NUMBER = config_json.at("DATABASE_CONNECTIONS_NUMBER").to_number<size_t>();
-        DATABASE_PORT = config_json.at("DATABASE_PORT").to_number<size_t>();
-        DATABASE_NAME = config_json.at("DATABASE_NAME").as_string();
-        DATABASE_USERNAME = config_json.at("DATABASE_USERNAME").as_string();
-        DATABASE_PASSWORD = config_json.at("DATABASE_PASSWORD").as_string();
-        FOLDERS_PATH = config_json.at("FOLDERS_PATH").as_string();
-        LOG_FILE_PATH = config_json.at("LOG_FILE_PATH").as_string();
-        SSL_CERT_PATH = config_json.at("SSL_CERT_PATH").as_string();
-        SSL_KEY_PATH = config_json.at("SSL_KEY_PATH").as_string();
-        CONSOLE_LOG_ENABLED = config_json.at("CONSOLE_LOG_ENABLED").as_bool();
-        JWT_SECRET_KEY = config_json.at("JWT_SECRET_KEY").as_string();
-        ACCESS_TOKEN_EXPIRY_TIME_MINUTES = std::chrono::minutes{
-            config_json.at("ACCESS_TOKEN_EXPIRY_TIME_MINUTES").to_number<size_t>()};
-        REFRESH_TOKEN_EXPIRY_TIME_DAYS = std::chrono::days{
-            config_json.at("REFRESH_TOKEN_EXPIRY_TIME_DAYS").to_number<size_t>()};
-        for (auto file_extension : config_json.at("ALLOWED_UPLOADING_FILE_EXTENSIONS").as_array())
+        server_ip_address = config_json.at("server_ip_address").as_string();
+        server_port = config_json.at("server_port").to_number<uint_least16_t>();
+        domain_name = config_json.at("domain_name").as_string();
+        threads_number = config_json.at("threads_number").to_number<int>();
+        database_connections_number = config_json.at("database_connections_number").to_number<size_t>();
+        database_port = config_json.at("database_port").to_number<size_t>();
+        database_name = config_json.at("database_name").as_string();
+        database_username = config_json.at("database_username").as_string();
+        database_password = config_json.at("database_password").as_string();
+        folders_path = config_json.at("folders_path").as_string();
+        log_file_path = config_json.at("log_file_path").as_string();
+        ssl_cert_path = config_json.at("ssl_cert_path").as_string();
+        ssl_key_path = config_json.at("ssl_key_path").as_string();
+        console_log_enabled = config_json.at("console_log_enabled").as_bool();
+        jwt_secret_key = config_json.at("jwt_secret_key").as_string();
+        access_token_expiry_time_minutes = std::chrono::minutes{
+            config_json.at("access_token_expiry_time_minutes").to_number<size_t>()};
+        refresh_token_expiry_time_days = std::chrono::days{
+            config_json.at("refresh_token_expiry_time_days").to_number<size_t>()};
+        operations_timeout = std::chrono::seconds{
+            config_json.at("operations_timeout").to_number<size_t>()};
+        for (const auto& file_extension : config_json.at("allowed_uploading_file_extensions").as_array())
         {
-            ALLOWED_UPLOADING_FILE_EXTENSIONS.emplace(file_extension.as_string());
+            allowed_uploading_file_extensions.emplace(file_extension.as_string());
         }
-        for (auto archive_extension : config_json.at("ALLOWED_ARCHIVE_EXTENSIONS").as_array())
+        for (const auto& archive_extension : config_json.at("allowed_archive_extensions").as_array())
         {
-            ALLOWED_ARCHIVE_EXTENSIONS.emplace(archive_extension.as_string());
+            allowed_archive_extensions.emplace(archive_extension.as_string());
         }
-        for (auto file_extension : config_json.at("ALLOWED_PARSING_FILE_EXTENSIONS").as_array())
+        for (const auto& file_extension : config_json.at("allowed_parsing_file_extensions").as_array())
         {
-            ALLOWED_PARSING_FILE_EXTENSIONS.emplace(file_extension.as_string());
+            allowed_parsing_file_extensions.emplace(file_extension.as_string());
         }
-        PATH_TO_7ZIP_LIB = config_json.at("PATH_TO_7ZIP_LIB").as_string();
-        ROWS_NUMBER_TO_EXAMINE = config_json.at("ROWS_NUMBER_TO_EXAMINE").to_number<size_t>();
-        MAX_BYTES_NUMBER_IN_ROW = config_json.at("MAX_BYTES_NUMBER_IN_ROW").to_number<size_t>();
-        MAX_ROWS_NUMBER_IN_NORMALIZED_FILE = config_json.at("MAX_ROWS_NUMBER_IN_NORMALIZED_FILE").to_number<size_t>();
+        path_to_7zip_lib = config_json.at("path_to_7zip_lib").as_string();
+        rows_number_to_examine = config_json.at("rows_number_to_examine").to_number<size_t>();
+        max_bytes_number_in_row = config_json.at("max_bytes_number_in_row").to_number<size_t>();
+        max_rows_number_in_normalized_file = config_json.at("max_rows_number_in_normalized_file").to_number<size_t>();
     }
 }
 

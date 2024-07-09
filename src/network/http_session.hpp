@@ -9,6 +9,7 @@
 #include <network/request_and_response_params.hpp>
 #include <utils/http_utils/uri.hpp>
 #include <utils/http_utils/http_endpoints_storage.hpp>
+#include <multipart_form_data/downloader.hpp>
 
 //internal
 #include <fstream>
@@ -67,6 +68,17 @@ class http_session : public std::enable_shared_from_this<http_session>
             beast::error_code error_code, 
             std::size_t bytes_transferred);
 
+        void do_read_uploading_files();
+
+        void on_read_uploading_files(
+            beast::error_code error_code, 
+            std::vector<std::filesystem::path>&& file_paths,
+            std::list<std::tuple<size_t, std::filesystem::path, std::string>>&& files_data, 
+            size_t user_id, 
+            size_t folder_id, 
+            database_connection_wrapper<file_system_database_connection>&& db_conn,
+            [[maybe_unused]] response_params& response);
+
         void prepare_error_response(http::status response_status, std::string_view error_message);
 
         void do_write_response(bool keep_alive);
@@ -86,37 +98,14 @@ class http_session : public std::enable_shared_from_this<http_session>
         // Validate jwt token depending on its type
         bool validate_jwt_token(jwt_token_type token_type);
 
-        void upload_files();
-
-        void process_uploading_file_header(
-            dynamic_buffer&& buffer, 
-            std::string_view&& boundary,
-            size_t user_id,
-            size_t folder_id,
-            std::ofstream&& file,
-            database_connection_wrapper<file_system_database_connection>&& db, 
-            std::list<std::tuple<size_t, std::filesystem::path, std::string>>&& file_paths,
-            beast::error_code error_code, std::size_t bytes_transferred);
-
-        void process_uploading_file_data(
-            dynamic_buffer&& buffer, 
-            std::string_view&& boundary,
-            size_t user_id,
-            size_t folder_id,
-            std::ofstream&& file,
-            database_connection_wrapper<file_system_database_connection>&& db_conn, 
-            std::list<std::tuple<size_t, std::filesystem::path, std::string>>&& file_paths,
-            beast::error_code error_code, std::size_t bytes_transferred);
-
         beast::ssl_stream<beast::tcp_stream> _stream;
         // Main buffer to use in read/write operations
         beast::flat_buffer _buffer;
-        // String buffer for downloading files
-        // Can't use the main one due to using asio read operations instead of beast
-        std::string _files_string_buffer;
         // Wrap parser in std::optional to use it several times as it can't be manually cleared 
         std::optional<http::request_parser<http::string_body>> _request_parser;
         http::response<http::string_body> _response;
+        // Wrapper over asio operations to perform files downloading via multipart/form-data protocol
+        multipart_form_data::downloader<beast::ssl_stream<beast::tcp_stream>, beast::flat_buffer> _form_data;
         // Encapsulate request and response params to pass them to request handlers 
         // to avoid direct access to _request_parser and _response
         request_params _request_params;

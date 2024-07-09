@@ -32,7 +32,7 @@ bool csv_file_normalization::normalize_file(const std::filesystem::path& file_pa
     }
 
     // Take buffer size of the number of bytes that is enough to process predefined number of rows to be examined
-    const size_t buffer_size = config::ROWS_NUMBER_TO_EXAMINE * config::MAX_BYTES_NUMBER_IN_ROW;
+    const size_t buffer_size = config::rows_number_to_examine * config::max_bytes_number_in_row;
     std::string buffer(buffer_size, char());
 
     input_file.read(buffer.data(), buffer_size);
@@ -211,10 +211,10 @@ bool csv_file_normalization::normalize_file(const std::filesystem::path& file_pa
         // Move position to the beginning of the next row
         row_start_position = newline_position + 1;
 
-        // We know that each row has to be less than config::MAX_BYTES_NUMBER_IN_ROW bytes 
+        // We know that each row has to be less than config::max_bytes_number_in_row bytes 
         // so if it is left less in buffer and we didn't read all the file 
         // then move the remainder to the beginning and read up to buffer_size again 
-        if (is_reading_pending && buffer_size - row_start_position < config::MAX_BYTES_NUMBER_IN_ROW)
+        if (is_reading_pending && buffer_size - row_start_position < config::max_bytes_number_in_row)
         {
             std::move(buffer.begin() + row_start_position, buffer.end(), buffer.begin());
 
@@ -300,7 +300,7 @@ std::vector<std::filesystem::path> csv_file_normalization::split_file(
     }
 
     // Take buffer size of the number of bytes that is enough to process predefined number of rows to be examined
-    const size_t buffer_size = config::ROWS_NUMBER_TO_EXAMINE * config::MAX_BYTES_NUMBER_IN_ROW;
+    const size_t buffer_size = config::rows_number_to_examine * config::max_bytes_number_in_row;
     std::string buffer(buffer_size, char());
 
     input_file.read(buffer.data(), buffer_size);
@@ -355,10 +355,10 @@ std::vector<std::filesystem::path> csv_file_normalization::split_file(
 
         row_start_position = newline_position + 1;
 
-        // We know that each row has to be less than config::MAX_BYTES_NUMBER_IN_ROW bytes 
+        // We know that each row has to be less than config::max_bytes_number_in_row bytes 
         // so if it is left less in buffer and we didn't read all the file 
         // then move the remainder to the beginning and read up to buffer_size again 
-        if (is_reading_pending && buffer_size - row_start_position < config::MAX_BYTES_NUMBER_IN_ROW)
+        if (is_reading_pending && buffer_size - row_start_position < config::max_bytes_number_in_row)
         {
             std::move(buffer.begin() + row_start_position, buffer.end(), buffer.begin());
 

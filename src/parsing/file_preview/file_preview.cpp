@@ -10,7 +10,7 @@ size_t file_preview::get_file_rows_number(const std::string& file_path)
         return static_cast<size_t>(-1);
     }
 
-    const size_t buffer_size = config::ROWS_NUMBER_TO_EXAMINE * config::MAX_BYTES_NUMBER_IN_ROW;
+    const size_t buffer_size = config::rows_number_to_examine * config::max_bytes_number_in_row;
     std::string buffer(buffer_size, char());
 
     size_t rows_number = 0;
@@ -36,9 +36,9 @@ std::pair<uint8_t, json::array> file_preview::get_file_raw_rows(
     size_t from_row_number, 
     size_t rows_number)
 {
-    // Any normalized file can't have more than MAX_ROWS_NUMBER_IN_NORMALIZED_FILE rows so don't process 
+    // Any normalized file can't have more than max_rows_number_in_normalized_file rows so don't process 
     // such requests. Zero rows doesn't have any sense too
-    if (rows_number > config::MAX_ROWS_NUMBER_IN_NORMALIZED_FILE || rows_number == 0)
+    if (rows_number > config::max_rows_number_in_normalized_file || rows_number == 0)
     {
         return {2, {}};
     }
@@ -51,7 +51,7 @@ std::pair<uint8_t, json::array> file_preview::get_file_raw_rows(
         return {1, {}};
     }
 
-    const size_t buffer_size = config::ROWS_NUMBER_TO_EXAMINE * config::MAX_BYTES_NUMBER_IN_ROW;;
+    const size_t buffer_size = config::rows_number_to_examine * config::max_bytes_number_in_row;;
     std::string buffer(buffer_size, char());
 
     size_t current_row_number = 0, offset = 0, read_bytes;

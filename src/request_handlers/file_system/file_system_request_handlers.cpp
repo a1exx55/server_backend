@@ -1,4 +1,5 @@
 #include <request_handlers/file_system/file_system_request_handlers.hpp>
+#include "file_system_request_handlers.hpp"
 
 void request_handlers::file_system::get_folders_info(
     [[maybe_unused]] const request_params& request, 
@@ -498,12 +499,207 @@ void request_handlers::file_system::get_files_info(const request_params& request
     response.body = json::serialize(files_info_json_opt.value());
 }
 
-void request_handlers::file_system::process_unzipping_archive(
+std::filesystem::path request_handlers::file_system::process_uploading_file(
+    std::string_view uploading_file_name,
     std::list<std::tuple<size_t, std::filesystem::path, std::string>>& files_data,
+    size_t user_id,
+    size_t folder_id,
+    database_connection_wrapper<file_system_database_connection>& db_conn,
+    response_params& response)
+{
+    size_t dot_position = uploading_file_name.find_last_of('.');
+
+    // File name has to contain extension
+    if (dot_position == std::string::npos)
+    {
+        prepare_error_response(
+            response,
+            http::status::unprocessable_entity,
+            "File name doesn't contain extension");
+
+        throw std::exception{};
+    }
+
+    std::string_view file_extension = uploading_file_name.substr(dot_position + 1);
+    std::string file_name = std::string{uploading_file_name.substr(0, dot_position)};
+
+    // Invalid file extension
+    if (!config::allowed_uploading_file_extensions.contains(std::string{file_extension}))
+    {
+        prepare_error_response(
+            response,
+            http::status::unprocessable_entity, 
+            "File name contains invalid extension ." + std::string{file_extension});
+
+        throw std::exception{};
+    }
+
+    // Trim whitespaces at the beggining and at the end of the file name
+    boost::algorithm::trim(file_name);
+
+    // File name has not to be empty
+    if (file_name.empty())
+    {
+        prepare_error_response(
+            response,
+            http::status::unprocessable_entity, 
+            "File name can't be empty");
+
+        throw std::exception{};
+    }
+
+    // Transform the string to UnicodeString to work with any unicode symbols
+    icu::UnicodeString file_name_unicode{file_name.c_str()};
+
+    // Trim the string to the allowed length limit
+    if (file_name_unicode.length() > 64)
+    {
+        file_name_unicode.retainBetween(0, 64);
+    }
+
+    file_name.clear();
+    file_name_unicode.toUTF8String(file_name);
+
+    // Check if the file with specified name exists in the database
+    // If that case we create names with copies by adding number after it: 
+    // test.txt -> test(1).txt -> test(2).txt until the modified name is available in the database
+    std::optional<bool> does_file_exist_opt = db_conn->check_file_existence_by_name(folder_id, file_name);
+
+    if (!does_file_exist_opt.has_value())
+    {
+        prepare_error_response(
+            response,
+            http::status::internal_server_error, 
+            "Internal server error occured");
+        
+        throw std::exception{};
+    }
+
+    // Source file name is not available in the database so start making copies
+    if (does_file_exist_opt.value())
+    {
+        file_name.append("(1)");
+
+        size_t copy_number = 1, copy_number_start_position = file_name.size() - 2;
+
+        while (true)    
+        {
+            does_file_exist_opt = db_conn->check_file_existence_by_name(folder_id, file_name);
+
+            if (!does_file_exist_opt.has_value())
+            {
+                prepare_error_response(
+                    response,
+                    http::status::internal_server_error, 
+                    "Internal server error occured");
+                
+                throw std::exception{};
+            }
+
+            // We found the available file name so stop creating copies
+            if (!does_file_exist_opt.value())
+            {
+                break;
+            }
+
+            // Increment current copy number and replace it in the file name
+            file_name.replace(
+                copy_number_start_position, 
+                file_name.size() - copy_number_start_position - 1,
+                std::to_string(++copy_number));
+        }
+    }
+
+    std::optional<std::tuple<size_t, std::filesystem::path, std::string>> file_data_opt = 
+        db_conn->insert_uploading_file(user_id, folder_id, file_name, file_extension);
+
+    // An error occured with database connection
+    if (!file_data_opt.has_value())
+    {
+        prepare_error_response(
+            response,
+            http::status::internal_server_error, 
+            "Internal server error occured");
+        
+        throw std::exception{};
+    }
+
+    // Store data of the current file to process it after the upload
+    files_data.emplace_back(file_data_opt.value());
+
+    return std::get<1>(files_data.back());
+}
+
+void request_handlers::file_system::process_uploaded_file(
+    [[maybe_unused]] const std::filesystem::path& uploading_file_path, 
+    std::list<std::tuple<size_t, std::filesystem::path, std::string>>& files_data, 
+    [[maybe_unused]] size_t user_id, 
+    [[maybe_unused]] size_t folder_id, 
+    database_connection_wrapper<file_system_database_connection>& db_conn,
+    response_params& response)
+{
+    // Define actions to clean up all the data about the file
+    auto process_file_cleanup = 
+        [&]
+        {
+            // Remove the file from the file system
+            try
+            {
+                std::filesystem::remove(std::get<1>(files_data.back()));
+            }
+            catch (const std::exception& ex)
+            {
+                LOG_ERROR << ex.what();
+            }
+
+            // Delete the file from the database
+            db_conn->delete_file(std::get<0>(files_data.back()));
+
+            // Remove the file from the list of uploaded files 
+            files_data.pop_back();
+        };
+
+    size_t file_size;
+
+    // Determine the file size of just uploaded file
+    try
+    {
+        file_size = std::filesystem::file_size(std::get<1>(files_data.back()));
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_ERROR << ex.what();
+
+        process_file_cleanup();
+   
+        prepare_error_response(
+            response,
+            http::status::internal_server_error,
+            "Internal server error occured");
+   
+        throw;
+    }
+
+    // Update the data about just uploaded file
+    if (!db_conn->update_uploaded_file(std::get<0>(files_data.back()), file_size).has_value())
+    {
+        process_file_cleanup();
+   
+        prepare_error_response(
+            response,
+            http::status::internal_server_error,
+            "Internal server error occured");
+
+        throw std::exception{};
+    }
+}
+
+void request_handlers::file_system::process_unzipping_archive(
+    std::list<std::tuple<size_t, std::filesystem::path, std::string>> &files_data,
     std::list<std::tuple<size_t, std::filesystem::path, std::string>>::iterator file_data_it,
     size_t user_id,
     size_t folder_id,
-    database_connection_wrapper<file_system_database_connection>& db_conn)
+    database_connection_wrapper<file_system_database_connection> &db_conn)
 {
     db_conn->change_file_status(std::get<0>(*file_data_it), file_status::unzipping);
     
@@ -524,7 +720,7 @@ void request_handlers::file_system::process_unzipping_archive(
 
     try
     {
-        static bit7z::Bit7zLibrary lib_7zip{config::PATH_TO_7ZIP_LIB};
+        static bit7z::Bit7zLibrary lib_7zip{config::path_to_7zip_lib};
         bit7z::BitArchiveReader archive_reader{lib_7zip, std::get<1>(*file_data_it)};
         
         // Don't retain archive structure to extract only files without nested folders
@@ -535,7 +731,7 @@ void request_handlers::file_system::process_unzipping_archive(
         {
             // Don't do anything with folders and files with invalid extensions 
             if (archive_item.isDir() || 
-                !config::ALLOWED_PARSING_FILE_EXTENSIONS.contains(archive_item.extension()))
+                !config::allowed_parsing_file_extensions.contains(archive_item.extension()))
             {
                 continue;
             }
@@ -762,7 +958,7 @@ void request_handlers::file_system::process_normalizing_csv_file(
         auto output_file_paths = csv_file_normalization::split_file(
             std::get<1>(file_data),
             std::get<1>(file_data).parent_path(),
-            config::MAX_ROWS_NUMBER_IN_NORMALIZED_FILE);
+            config::max_rows_number_in_normalized_file);
 
         // If result is not empty then splitting succeded
         if (!output_file_paths.empty())
@@ -928,7 +1124,7 @@ void request_handlers::file_system::process_uploaded_files(
     for (auto file_data_it = files_data.begin(); file_data_it != files_data.end(); ++file_data_it)
     {
         // Check if the file is archive
-        if (config::ALLOWED_ARCHIVE_EXTENSIONS.contains(std::get<2>(*file_data_it)))
+        if (config::allowed_archive_extensions.contains(std::get<2>(*file_data_it)))
         {
             // Unzip archive to get actual files
             process_unzipping_archive(files_data, file_data_it, user_id, folder_id, db_conn);

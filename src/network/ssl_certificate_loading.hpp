@@ -16,10 +16,10 @@ inline void load_ssl_certificate(boost::asio::ssl::context& ctx)
         boost::asio::ssl::context::no_tlsv1_1);
 
     // Set ssl certificate
-    ctx.use_certificate_chain_file(config::SSL_CERT_PATH);
+    ctx.use_certificate_chain_file(config::ssl_cert_path);
 
     // Set ssl key
-    ctx.use_private_key_file(config::SSL_KEY_PATH, boost::asio::ssl::context::file_format::pem);
+    ctx.use_private_key_file(config::ssl_key_path, boost::asio::ssl::context::file_format::pem);
 }
 
 #endif

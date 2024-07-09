@@ -140,7 +140,7 @@ std::optional<std::pair<json::object, std::string>> file_system_database_connect
                     "VALUES ((SELECT * FROM current_id),{},{} || (SELECT * FROM current_id)::text || '/',{}) "
                     "RETURNING id,path",
                 transaction.quote(folder_name),
-                transaction.quote(config::FOLDERS_PATH),
+                transaction.quote(config::folders_path),
                 user_id));
 
         json::object folder_data_json;
@@ -545,7 +545,7 @@ file_system_database_connection::insert_uploading_file(
                     "RETURNING id,path",
                 transaction.quote(file_name),
                 transaction.quote(file_extension),
-                transaction.quote(config::FOLDERS_PATH),
+                transaction.quote(config::folders_path),
                 folder_id,
                 user_id));
 
@@ -674,7 +674,7 @@ file_system_database_connection::insert_processed_file(
                     "RETURNING id,path",
                 transaction.quote(file_name),
                 transaction.quote(file_extension),
-                transaction.quote(config::FOLDERS_PATH),
+                transaction.quote(config::folders_path),
                 folder_id,
                 file_size,
                 user_id,

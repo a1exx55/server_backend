@@ -97,7 +97,7 @@ class jwt_utils
         static bool is_token_valid(const std::string &token);
 
     private:
-        inline static const jwt::algorithm::hs256 _crypto_algrorithm{config::JWT_SECRET_KEY};
+        inline static const jwt::algorithm::hs256 _crypto_algrorithm{config::jwt_secret_key};
 
         inline static const jwt::verifier<jwt::default_clock, traits> _verifier{jwt::verify<traits>()
 		    .allow_algorithm(_crypto_algrorithm)};

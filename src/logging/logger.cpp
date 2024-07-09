@@ -14,12 +14,12 @@ BOOST_LOG_GLOBAL_LOGGER_INIT(_logger_mt, src::severity_logger_mt)
         << expr::smessage << "\"";
 
     logging::add_file_log(
-        logging::keywords::file_name = config::LOG_FILE_PATH,
+        logging::keywords::file_name = config::log_file_path,
         logging::keywords::open_mode = std::ios::app,
         logging::keywords::auto_flush = true,
         logging::keywords::format = _format);
         
-    if (config::CONSOLE_LOG_ENABLED)
+    if (config::console_log_enabled)
     {
         logging::add_console_log(
             std::clog,
